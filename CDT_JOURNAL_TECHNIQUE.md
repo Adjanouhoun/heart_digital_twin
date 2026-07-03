@@ -522,3 +522,21 @@ APD tronque car tend=50ms (besoin 500ms pour APD complet).
 
 ### D2.1 passe de 55% a 80%
   Reste : validation contre benchmarks publies
+
+#### Pipeline reel 10 patients — resultats finaux
+| Patient   | EP%  | Endo(mm) | EF%  | Psys  | Pdia | CO   |
+|-----------|------|----------|------|-------|------|------|
+| patient001| 12.8 | -1.777   | 57.2 | 113.9 | 80.3 | 5.15 |
+| patient002| 45.7 | DIVERGE  | -    | -     | -    | -    |
+| patient003| 58.2 | DIVERGE  | -    | -     | -    | -    |
+| patient004| 20.1 |  1.878   | 58.5 | 116.3 | 82.1 | 5.26 |
+| patient005| 35.4 |  0.892   | 46.1 | 91.9  | 64.9 | 4.15 |
+| patient006| 12.6 |  0.676   | 43.5 | 86.6  | 61.0 | 3.91 |
+| patient007| 15.5 |  0.386   | 39.8 | 79.4  | 56.1 | 3.58 |
+| patient008| 11.3 | -0.933   | 46.7 | 92.9  | 65.6 | 4.20 |
+| patient009| 10.6 |  0.822   | 45.3 | 90.2  | 63.7 | 4.07 |
+| patient010| 11.6 | -2.131   | 61.6 | 122.6 | 86.5 | 5.55 |
+
+8/10 patients : pipeline reel complet
+2 divergent : patient002 (45.7% act) et patient003 (58.2% act)
+Cause : trop d'elements actifs → stress field trop fort pour Newton
