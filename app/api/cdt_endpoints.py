@@ -1,190 +1,266 @@
 """
-CDT API Endpoints — Phase 06
-Sert les maillages, simulations et surrogates au frontend.
+CDT API — FastAPI + WebSocket (D4.1)
+
+Endpoints REST :
+  POST /api/v1/twin/create     — creer un jumeau
+  POST /api/v1/twin/simulate   — lancer une simulation
+  GET  /api/v1/twin/{id}/state — etat du jumeau
+  GET  /api/v1/twin/{id}/results — resultats
+
+WebSocket :
+  WS /api/v1/twin/{id}/stream  — streaming temps reel
+
+Machine d'etat :
+  CREATED → SIMULATING → COMPLETED / FAILED
 """
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-import numpy as np
+import asyncio
 import json
-import os
-import torch
-import gpytorch
-from typing import Optional
-from pathlib import Path
+import time
+import uuid
+from enum import Enum
+from typing import Optional, Dict
 
-router = APIRouter(prefix="/api/cdt", tags=["cdt"])
+import numpy as np
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from pydantic import BaseModel
 
-MESH_DIR = Path(os.path.expanduser("~/cdt/reports/meshes_acdc/meshes"))
-DOE_DIR = Path(os.path.expanduser("~/cdt/reports/doe"))
+app = FastAPI(title="Cardiac Digital Twin API", version="1.0.0")
 
 
-# ─── Models ───
+class TwinState(str, Enum):
+    CREATED = "created"
+    SIMULATING = "simulating"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
-class PatientSummary(BaseModel):
-    id: str
-    nodes: int
-    elements: int
-    has_fibers: bool
-    has_mesh: bool
 
-class SimulationRequest(BaseModel):
+class TwinSession:
+    def __init__(self, twin_id: str, patient_id: str):
+        self.twin_id = twin_id
+        self.patient_id = patient_id
+        self.state = TwinState.CREATED
+        self.created_at = time.time()
+        self.parameters = {}
+        self.results = {}
+        self.progress = 0.0
+        self.error = None
+
+
+sessions: Dict[str, TwinSession] = {}
+
+
+class CreateTwinRequest(BaseModel):
     patient_id: str
-    sigma_l: float = 0.30
-    sigma_t: float = 0.10
+
+
+class SimulateRequest(BaseModel):
+    twin_id: str
+    sigma_l: float = 0.3
+    sigma_t: float = 0.1
     T_max_kPa: float = 135.0
     heart_rate_bpm: float = 75.0
+    a_kPa: float = 0.496
+    b: float = 7.209
+    R_p: float = 1.5e8
+    C_a: float = 1.0e-8
 
-class SimulationResult(BaseModel):
+
+class TwinStateResponse(BaseModel):
+    twin_id: str
     patient_id: str
-    cv_ms: float
-    ef_pct: float
-    p_systolic: float
-    p_diastolic: float
-    benchmark: bool
+    state: str
+    progress: float
+    error: Optional[str] = None
 
 
-# ─── Endpoints ───
-
-@router.get("/patients")
-def list_patients():
-    """Liste tous les patients avec maillages disponibles."""
-    patients = []
-    for f in sorted(MESH_DIR.glob("*.pts")):
-        pid = f.stem
-        with open(f) as fh:
-            n_nodes = int(fh.readline().strip())
-        elem_path = MESH_DIR / f"{pid}.elem"
-        n_elems = 0
-        if elem_path.exists():
-            with open(elem_path) as fh:
-                n_elems = int(fh.readline().strip())
-        patients.append(PatientSummary(
-            id=pid,
-            nodes=n_nodes,
-            elements=n_elems,
-            has_fibers=(MESH_DIR / f"{pid}_fibers.lon").exists(),
-            has_mesh=True
-        ))
-    return patients
+class SimulationResults(BaseModel):
+    twin_id: str
+    ef_pct: float = 0.0
+    edv_mL: float = 0.0
+    esv_mL: float = 0.0
+    sv_mL: float = 0.0
+    p_systolic_mmHg: float = 0.0
+    p_diastolic_mmHg: float = 0.0
+    p_mean_mmHg: float = 0.0
+    cv_ms: float = 0.0
+    apd90_ms: float = 0.0
+    co_L_min: float = 0.0
+    output_vector: list = []
 
 
-@router.get("/patients/{patient_id}/mesh")
-def get_mesh(patient_id: str, max_faces: int = 5000):
-    """Retourne le maillage surface pour la visualisation 3D."""
-    from collections import Counter
-
-    pts_path = MESH_DIR / f"{patient_id}.pts"
-    elem_path = MESH_DIR / f"{patient_id}.elem"
-
-    if not pts_path.exists():
-        raise HTTPException(404, f"Patient {patient_id} not found")
-
-    with open(pts_path) as f:
-        f.readline()
-        nodes = np.array([list(map(float, l.split())) for l in f])
-
-    with open(elem_path) as f:
-        f.readline()
-        elements = np.array([[int(x) for x in l.split()[1:5]] for l in f])
-
-    # Extraire surface
-    face_count = Counter()
-    for tet in elements:
-        for face in [(tet[0],tet[1],tet[2]), (tet[0],tet[1],tet[3]),
-                      (tet[0],tet[2],tet[3]), (tet[1],tet[2],tet[3])]:
-            face_count[tuple(sorted(face))] += 1
-
-    surface = [[int(x) for x in f] for f, c in face_count.items() if c == 1]
-
-    # Centrer et normaliser
-    center = nodes.mean(0)
-    nodes_c = nodes - center
-    scale = max(nodes_c.max(0) - nodes_c.min(0))
-    nodes_norm = (nodes_c / (scale / 2)).tolist()
-
-    return {
-        "patient_id": patient_id,
-        "vertices": nodes_norm,
-        "faces": surface[:max_faces],
-        "total_faces": len(surface),
-        "n_tets": int(len(elements))
-    }
+@app.get("/api/v1/health")
+async def health():
+    return {"status": "ok", "version": "1.0.0", "sessions": len(sessions)}
 
 
-@router.post("/simulate")
-def simulate(req: SimulationRequest):
-    """Lance une simulation CDT rapide via GP emulators."""
-    # Charger les stats de normalisation
-    doe_path = DOE_DIR / "doe_500_results.json"
-    if not doe_path.exists():
-        raise HTTPException(500, "DoE not available")
+@app.post("/api/v1/twin/create")
+async def create_twin(req: CreateTwinRequest):
+    twin_id = str(uuid.uuid4())[:8]
+    session = TwinSession(twin_id, req.patient_id)
+    sessions[twin_id] = session
+    return {"twin_id": twin_id, "state": session.state, "patient_id": req.patient_id}
 
-    with open(doe_path) as f:
-        doe = json.load(f)
 
-    param_names = list(doe[0]["params"].keys())
-    X = np.array([[d["params"][k] for k in param_names] for d in doe])
-    X_mean, X_std = X.mean(0), X.std(0) + 1e-8
-
-    # Construire le vecteur de parametres
-    params = {
-        "sigma_l": req.sigma_l, "sigma_t": req.sigma_t,
-        "sigma_n": 0.05, "a_kPa": 0.496, "b": 7.209,
-        "a_f_kPa": 15.193, "b_f": 20.417,
-        "T_max_kPa": req.T_max_kPa,
-        "heart_rate_bpm": req.heart_rate_bpm,
-        "R_p": 1.2e8
-    }
-
-    x = np.array([params[k] for k in param_names])
-    x_norm = (x - X_mean) / X_std
-
-    # Predire via GP (cv_ms)
-    predictions = {}
-    for name in ["cv_ms", "p_sys_mmHg", "p_dia_mmHg", "sv_mL"]:
-        gp_path = DOE_DIR / f"gp_{name}.pth"
-        if gp_path.exists():
-            # Prediction simplifiee (moyenne du DoE pour demo)
-            Y = np.array([d["output_vector"] for d in doe])
-            dim = {"cv_ms": 0, "p_sys_mmHg": 5, "p_dia_mmHg": 7, "sv_mL": 8}[name]
-            predictions[name] = float(Y[:, dim].mean())
-
-    return SimulationResult(
-        patient_id=req.patient_id,
-        cv_ms=predictions.get("cv_ms", 0.825),
-        ef_pct=60.0,
-        p_systolic=predictions.get("p_sys_mmHg", 128.3),
-        p_diastolic=predictions.get("p_dia_mmHg", 60.0),
-        benchmark=True
+@app.get("/api/v1/twin/{twin_id}/state")
+async def get_state(twin_id: str):
+    if twin_id not in sessions:
+        raise HTTPException(status_code=404, detail="Twin not found")
+    s = sessions[twin_id]
+    return TwinStateResponse(
+        twin_id=s.twin_id, patient_id=s.patient_id,
+        state=s.state, progress=s.progress, error=s.error
     )
 
 
-@router.get("/doe/summary")
-def doe_summary():
-    """Resume du Design of Experiments."""
-    doe_path = DOE_DIR / "doe_500_results.json"
-    if not doe_path.exists():
-        raise HTTPException(404, "DoE not generated")
+@app.post("/api/v1/twin/simulate")
+async def simulate(req: SimulateRequest):
+    if req.twin_id not in sessions:
+        raise HTTPException(status_code=404, detail="Twin not found")
+    session = sessions[req.twin_id]
+    session.state = TwinState.SIMULATING
+    session.parameters = req.model_dump()
+    session.progress = 0.0
 
-    with open(doe_path) as f:
-        doe = json.load(f)
+    try:
+        from app.solver.coupled_solver import CoupledSolver, SimulationParameters
+        import os
 
-    gp_path = DOE_DIR / "gp_emulators_summary.json"
-    gp_summary = {}
-    if gp_path.exists():
-        with open(gp_path) as f:
-            gp_summary = json.load(f)
+        mesh_dir = os.path.expanduser("~/cdt/reports/meshes_acdc/meshes")
+        pid = session.patient_id
 
-    sobol_path = DOE_DIR / "sensitivity_sobol.json"
-    sobol = {}
-    if sobol_path.exists():
-        with open(sobol_path) as f:
-            sobol = json.load(f)
+        with open(f"{mesh_dir}/{pid}.pts") as f:
+            f.readline()
+            nodes = np.array([list(map(float, l.split())) for l in f])
+        with open(f"{mesh_dir}/{pid}.elem") as f:
+            f.readline()
+            elements = np.array([[int(x) for x in l.split()[1:5]] for l in f])
+        with open(f"{mesh_dir}/{pid}_fibers.lon") as f:
+            f.readline()
+            fibers = np.array([list(map(float, l.split()))[:3] for l in f])
 
-    return {
-        "n_simulations": len(doe),
-        "n_params": len(doe[0]["params"]),
-        "param_names": list(doe[0]["params"].keys()),
-        "gp_emulators": gp_summary,
-        "sensitivity": sobol
-    }
+        params = SimulationParameters(
+            sigma_l=req.sigma_l, sigma_t=req.sigma_t,
+            T_max_kPa=req.T_max_kPa, heart_rate_bpm=req.heart_rate_bpm,
+            a_kPa=req.a_kPa, b=req.b, R_p=req.R_p, C_a=req.C_a,
+            duration_ms=500.0,
+        )
+
+        solver = CoupledSolver()
+        session.progress = 10.0
+        result = solver.simulate(params, nodes, elements, fibers, pid, session.twin_id)
+        row = result.to_doe_row()
+
+        session.results = row
+        session.state = TwinState.COMPLETED
+        session.progress = 100.0
+
+        return {"twin_id": req.twin_id, "state": "completed", "results": row}
+
+    except Exception as e:
+        session.state = TwinState.FAILED
+        session.error = str(e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/twin/{twin_id}/results")
+async def get_results(twin_id: str):
+    if twin_id not in sessions:
+        raise HTTPException(status_code=404, detail="Twin not found")
+    s = sessions[twin_id]
+    if s.state != TwinState.COMPLETED:
+        raise HTTPException(status_code=400, detail=f"State is {s.state}, not completed")
+    return SimulationResults(twin_id=twin_id, **{
+        k: v for k, v in s.results.items()
+        if k in SimulationResults.model_fields
+    })
+
+
+@app.websocket("/api/v1/twin/{twin_id}/stream")
+async def stream_twin(websocket: WebSocket, twin_id: str):
+    await websocket.accept()
+
+    if twin_id not in sessions:
+        await websocket.send_json({"error": "Twin not found"})
+        await websocket.close()
+        return
+
+    session = sessions[twin_id]
+
+    try:
+        while True:
+            msg = await asyncio.wait_for(websocket.receive_json(), timeout=30.0)
+            action = msg.get("action")
+
+            if action == "get_state":
+                await websocket.send_json({
+                    "type": "state",
+                    "twin_id": twin_id,
+                    "state": session.state,
+                    "progress": session.progress,
+                })
+
+            elif action == "simulate":
+                session.state = TwinState.SIMULATING
+                session.progress = 0.0
+
+                await websocket.send_json({"type": "progress", "step": "ep", "progress": 10})
+
+                from app.solver.coupled_solver import CoupledSolver, SimulationParameters
+                import os
+
+                mesh_dir = os.path.expanduser("~/cdt/reports/meshes_acdc/meshes")
+                pid = session.patient_id
+
+                with open(f"{mesh_dir}/{pid}.pts") as f:
+                    f.readline()
+                    nodes = np.array([list(map(float, l.split())) for l in f])
+                with open(f"{mesh_dir}/{pid}.elem") as f:
+                    f.readline()
+                    elements = np.array([[int(x) for x in l.split()[1:5]] for l in f])
+                with open(f"{mesh_dir}/{pid}_fibers.lon") as f:
+                    f.readline()
+                    fibers = np.array([list(map(float, l.split()))[:3] for l in f])
+
+                params = SimulationParameters(
+                    sigma_l=msg.get("sigma_l", 0.3),
+                    sigma_t=msg.get("sigma_t", 0.1),
+                    T_max_kPa=msg.get("T_max_kPa", 135.0),
+                    heart_rate_bpm=msg.get("heart_rate_bpm", 75.0),
+                    R_p=msg.get("R_p", 1.5e8),
+                    C_a=msg.get("C_a", 1.0e-8),
+                    duration_ms=500.0,
+                )
+
+                await websocket.send_json({"type": "progress", "step": "mechanics", "progress": 40})
+
+                solver = CoupledSolver()
+                result = solver.simulate(params, nodes, elements, fibers, pid, twin_id)
+
+                await websocket.send_json({"type": "progress", "step": "windkessel", "progress": 80})
+
+                row = result.to_doe_row()
+                session.results = row
+                session.state = TwinState.COMPLETED
+                session.progress = 100.0
+
+                await websocket.send_json({
+                    "type": "results",
+                    "progress": 100,
+                    "data": {k: float(v) if isinstance(v, (int, float, np.floating)) else v
+                             for k, v in row.items()},
+                })
+
+            elif action == "update_param":
+                param = msg.get("param")
+                value = msg.get("value")
+                if param and value is not None:
+                    session.parameters[param] = value
+                    await websocket.send_json({"type": "param_updated", "param": param, "value": value})
+
+            elif action == "ping":
+                await websocket.send_json({"type": "pong"})
+
+    except WebSocketDisconnect:
+        pass
+    except asyncio.TimeoutError:
+        await websocket.close()
