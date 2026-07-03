@@ -503,3 +503,22 @@ APD tronque car tend=50ms (besoin 500ms pour APD complet).
   D2.2 : CONFORME
   D3.1 : CONFORME (10/11 GP R2>0.8)
   D3.2 : CONFORME (Sobol correct)
+
+---
+## JALON MAJEUR — Pipeline reel D2.1 (3 juillet 2026)
+
+### Premier pipeline 100% reel :
+  openCARP EP (vm.igb pre-calcule) → mapping activation
+  FEniCSx mecanique (Land 2015, load stepping) → contraction
+  Windkessel calibre (122/78) → hemodynamique
+
+### Resultats patient001 :
+  EF = 57.2% (physiologique)
+  P_sys = 113.9 mmHg (physiologique)
+  P_dia = 80.3 mmHg (physiologique)
+  CO = 5.15 L/min (physiologique)
+  Endo displacement = -1.777mm (contraction)
+  Temps : EP pre-calcule + Meca 106s + WK <1s
+
+### D2.1 passe de 55% a 80%
+  Reste : validation contre benchmarks publies
