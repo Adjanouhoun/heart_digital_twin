@@ -639,3 +639,40 @@ physiologique.
 - QC bug : min_jacobian=0.0 mais qc_passed=True. La condition min_jacobian>0
   devrait echouer. Elements degeneres a filtrer (cf. fix h_min>=0.3mm audit).
 - Contrat maillage->openCARP : coordonnees en um (mm x1000) a verifier.
+
+---
+## RAFFINEMENT — Densite du maillage myocarde (4 juillet 2026, session 9 suite)
+
+### Objectif
+Reduire la densite du maillage (110K nodes) vers la taille element spec
+projet (0.5-1.5mm), en restant sur Gmsh.
+
+### Ce qui NE marche pas (documente pour ne pas y revenir)
+Remaillage via Gmsh classifySurfaces + createGeometry echoue sur les surfaces
+marching_cubes, quelle que soit la valeur de forReparametrization :
+- forReparametrization=True  -> "Wrong topology of boundary mesh for parametrization"
+- forReparametrization=False -> "Invalid exterior boundary mesh for parametrization"
+Les surfaces medicales brutes sont trop irregulieres pour la parametrisation
+Gmsh. C'est la limite fondamentale rencontree dans l'audit (9 tentatives).
+
+### Solution retenue (conforme : Gmsh volume + controle densite en amont)
+Reechantillonner le masque myocarde a la resolution cible (target_mm=1.5)
+AVANT marching_cubes (scipy.ndimage.zoom). La surface produite est moins dense,
+donc le maillage volumique mesh-based (createTopology + addVolume) l'est aussi.
+Le remaillage Gmsh interne est evite.
+
+Architecture du mailleur (2 strategies) :
+1. _gmsh_remesh (classifySurfaces) : tentee en primaire, echoue sur surfaces
+   medicales (log warning, pas bloquant)
+2. _gmsh_mesh_based : secours robuste, produit le maillage effectif
+
+### Resultat patient001
+- target_mm=1.0 : 110K nodes
+- target_mm=1.5 : 57058 nodes, 251533 tets (apres filtrage 10702 slivers)
+- min_jacobian=0.000858 (>0), num_degenerate=0, qc_passed=True
+
+### Parametre ajustable
+target_mm dans _mask_to_stl controle la densite :
+1.5mm -> ~57K, 2.0mm -> ~25K, 2.5mm -> ~15K.
+Valeur optimale a fixer quand openCARP sera branche dans le DAG (critere reel :
+temps de simulation + convergence PETSc), pas avant.
