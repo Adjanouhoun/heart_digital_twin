@@ -557,3 +557,45 @@ Cause : trop d'elements actifs → stress field trop fort pour Newton
   D1.1 ACDC : CONFORME (MYO=0.910)
   M&Ms      : Colab en cours
   EMIDEC    : a faire
+
+---
+## JALON — DAG production connecté bout-en-bout (4 juillet 2026, session 9)
+
+### D1.1 volet 2 — Pipeline Airflow DICOM->.mesh VALIDE end-to-end
+
+Blocage leve : "Airflow deploye mais DAG pas connecte bout-en-bout" (status strict).
+
+#### Cause racine du blocage (jamais execute avant)
+- Image apache/airflow:2.9.1 nue : aucune dep du pipeline (SimpleITK, scikit-image, boto3, torch)
+- ./app non monte dans les conteneurs Airflow -> imports app.* impossibles
+- get_segmenter() cable en dur sur DemoSegmenter (aucun chargement de checkpoint)
+- Contrat de labels inverse (LV=1/RV=3) vs entrainement (RV=1/LV=3)
+
+#### Corrections (commits 35f472a + precedent)
+- docker/Dockerfile.airflow : image custom avec deps reelles + torch + dynamic_network_architectures
+- docker-compose.yml : monte ./app et ./models, NNUNET_CHECKPOINT_PATH
+- NNUNetV2Segmenter : charge le checkpoint nnU-Net v2 officiel (cle network_weights)
+  0 missing / 0 unexpected keys, archi identique
+- Labels corriges RV=1, MYO=2, LV=3 (verifie contre dataset_json du checkpoint)
+
+#### Validation segmentation seule (patient001 ACDC, vrai modele)
+- Dice RV=0.9568, MYO=0.9266, LV=0.9824
+- Confirme labels corrects (sinon RV/LV auraient un Dice catastrophique)
+- Checkpoint : results_nifti epoch559 EMA=0.9257
+
+#### Run DAG complet (twin_test001, job_test_002)
+- 8/8 taches success : start->preprocess->segment->mesh->qc_mesh->fibers->register->end
+- preprocess 78s (N4ITK), segment 26s (vrai nnU-Net), mesh/qc/fibers <5s
+- Artefacts MinIO : mask.nii.gz (47KB), mesh.pts/.elem/.lon
+- DB segmentation_jobs : model_version=nnunet-v2-official-epoch559-ema0.9257
+  volume_lv=287mL, volume_myo=173mL (coherent avec test manuel 290/177)
+  min_jacobian=0.5625 (QC passe)
+
+#### Points ouverts (prochains chantiers)
+- Maillage trivial (8 nodes) : la tache mesh du DAG utilise marching_cubes+Gmsh
+  fallback, PAS le vrai TetGen (scripts/generate_meshes_acdc.py, 9/10 patients).
+  Brancher le vrai TetGen = prochaine etape.
+- Injection patient court-circuite Phase 01 (twins.consent_id cree manuellement).
+  En production, l'API d'ingestion cree cette entree avec un vrai consent_id.
+- Etapes DAG 4-7 (simulation openCARP+FEniCSx+WK, validation SLOs) restent en
+  scripts separes, pas encore dans le DAG.
