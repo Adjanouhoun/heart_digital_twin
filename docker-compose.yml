@@ -135,6 +135,8 @@ services:
     volumes:
       - ./app:/app/app
       - ./reports/meshes_acdc/meshes:/app/data/meshes
+      - ./reports/doe:/app/data/doe
+      - ./models:/app/models
     networks: [cdt-net]
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
@@ -234,7 +236,9 @@ services:
     command: -c "airflow db migrate && airflow users create --username admin --password cdt_admin_2024 --firstname CDT --lastname Admin --role Admin --email admin@cdt.local || true"
 
   airflow-webserver:
-    image: apache/airflow:2.9.1
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.airflow
     container_name: cdt-airflow-webserver
     depends_on:
       airflow-db:
@@ -245,15 +249,21 @@ services:
       AIRFLOW__CORE__FERNET_KEY: 'ZmDfcTF7_60GrrY167zsiPd67pEvs0aGOv2oasOM1Pg='
       AIRFLOW__WEBSERVER__SECRET_KEY: 'cdt_airflow_secret_key'
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      PYTHONPATH: /opt/airflow
+      NNUNET_CHECKPOINT_PATH: /opt/airflow/models/checkpoint_best.pth
     volumes:
       - ./airflow/dags:/opt/airflow/dags
+      - ./app:/opt/airflow/app
+      - ./models:/opt/airflow/models
     ports:
       - "8080:8080"
     networks: [cdt-net]
     command: webserver
 
   airflow-scheduler:
-    image: apache/airflow:2.9.1
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.airflow
     container_name: cdt-airflow-scheduler
     depends_on:
       airflow-db:
@@ -264,8 +274,12 @@ services:
       AIRFLOW__CORE__FERNET_KEY: 'ZmDfcTF7_60GrrY167zsiPd67pEvs0aGOv2oasOM1Pg='
       AIRFLOW__WEBSERVER__SECRET_KEY: 'cdt_airflow_secret_key'
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      PYTHONPATH: /opt/airflow
+      NNUNET_CHECKPOINT_PATH: /opt/airflow/models/checkpoint_best.pth
     volumes:
       - ./airflow/dags:/opt/airflow/dags
+      - ./app:/opt/airflow/app
+      - ./models:/opt/airflow/models
     networks: [cdt-net]
     command: scheduler
 

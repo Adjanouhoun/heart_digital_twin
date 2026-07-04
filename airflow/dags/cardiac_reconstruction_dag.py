@@ -166,8 +166,10 @@ def segment(**context):
     ti.xcom_push(key="spacing_mm",     value=list(spacing_mm))
     ti.xcom_push(key="volume_lv_ml",   value=result.volume_lv_ml)
     ti.xcom_push(key="volume_myo_ml",  value=result.volume_myo_ml)
+    ti.xcom_push(key="volume_scar_ml", value=result.volume_scar_ml)
     ti.xcom_push(key="scar_burden_pct",value=result.scar_burden_pct)
-    return {"status": "ok", "mask_key": mask_key}
+    ti.xcom_push(key="model_name",     value=result.model_name)
+    return {"status": "ok", "mask_key": mask_key, "model_name": result.model_name}
 
 
 def mesh(**context):
@@ -329,9 +331,9 @@ def register_results(**context):
         ti.xcom_pull(task_ids="segment", key="mask_key"),
         ti.xcom_pull(task_ids="segment", key="volume_lv_ml"),
         ti.xcom_pull(task_ids="segment", key="volume_myo_ml"),
-        0.0,
+        ti.xcom_pull(task_ids="segment", key="volume_scar_ml"),
         ti.xcom_pull(task_ids="segment", key="scar_burden_pct"),
-        "nnunet-v2-demo", datetime.utcnow()
+        ti.xcom_pull(task_ids="segment", key="model_name"), datetime.utcnow()
     ))
 
     # Insérer le mesh record

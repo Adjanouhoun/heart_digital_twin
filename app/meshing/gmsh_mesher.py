@@ -60,8 +60,10 @@ class CardiacMesher:
         )
 
     def _extract_surfaces_stl(self, mask, spacing_mm, tmp_dir):
+        # Convention de labels ACDC (cf. app/segmentation/nnunet_wrapper.py::CardiacLabel) :
+        # 0=background, 1=RV, 2=MYO, 3=LV — DOIT matcher la sortie du segmenteur reel.
         stl_files = {}
-        for label, name in [(1, "lv"), (2, "myo"), (3, "rv")]:
+        for label, name in [(1, "rv"), (2, "myo"), (3, "lv")]:
             binary = (mask == label).astype(np.uint8)
             if binary.sum() == 0:
                 continue
