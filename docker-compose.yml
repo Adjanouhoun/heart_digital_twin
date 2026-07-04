@@ -249,7 +249,7 @@ services:
       AIRFLOW__CORE__FERNET_KEY: 'ZmDfcTF7_60GrrY167zsiPd67pEvs0aGOv2oasOM1Pg='
       AIRFLOW__WEBSERVER__SECRET_KEY: 'cdt_airflow_secret_key'
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
-      PYTHONPATH: /opt/airflow
+      PYTHONPATH: /opt/airflow:/usr/lib/python3/dist-packages
       NNUNET_CHECKPOINT_PATH: /opt/airflow/models/checkpoint_best.pth
     volumes:
       - ./airflow/dags:/opt/airflow/dags
@@ -274,7 +274,7 @@ services:
       AIRFLOW__CORE__FERNET_KEY: 'ZmDfcTF7_60GrrY167zsiPd67pEvs0aGOv2oasOM1Pg='
       AIRFLOW__WEBSERVER__SECRET_KEY: 'cdt_airflow_secret_key'
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
-      PYTHONPATH: /opt/airflow
+      PYTHONPATH: /opt/airflow:/usr/lib/python3/dist-packages
       NNUNET_CHECKPOINT_PATH: /opt/airflow/models/checkpoint_best.pth
     volumes:
       - ./airflow/dags:/opt/airflow/dags

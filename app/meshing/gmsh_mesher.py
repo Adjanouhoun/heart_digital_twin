@@ -37,8 +37,17 @@ class CardiacMesher:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
-            stl_files = self._extract_surfaces_stl(mask, spacing_mm, tmp)
-            nodes, elements, element_tags = self._run_gmsh(stl_files, element_size_min, element_size_max, tmp)
+            # Conforme au projet : on maille le MYOCARDE seul (label 2).
+            # LDRB (fibres) et openCARP (EP) operent sur le tissu musculaire,
+            # PAS sur les cavites sanguines VG/VD. Mailler les 3 organes serait
+            # une erreur physiologique.
+            myo_binary = (mask == 2).astype(np.uint8)
+            if myo_binary.sum() == 0:
+                logger.error("mesher.no_myocardium", msg="Aucun voxel myocarde (label 2) dans le masque")
+                nodes, elements, element_tags = self._fallback_mesh(element_size_max)
+            else:
+                myo_stl = self._mask_to_stl(myo_binary, spacing_mm, tmp / "myo.stl")
+                nodes, elements, element_tags = self._run_gmsh(myo_stl, element_size_min, element_size_max, tmp)
 
         qc = self._compute_mesh_quality(nodes, elements)
         pts_bytes  = self._export_pts(nodes)
@@ -59,27 +68,18 @@ class CardiacMesher:
             duration_seconds=round(duration, 2), qc_passed=qc_passed,
         )
 
-    def _extract_surfaces_stl(self, mask, spacing_mm, tmp_dir):
-        # Convention de labels ACDC (cf. app/segmentation/nnunet_wrapper.py::CardiacLabel) :
-        # 0=background, 1=RV, 2=MYO, 3=LV — DOIT matcher la sortie du segmenteur reel.
-        stl_files = {}
-        for label, name in [(1, "rv"), (2, "myo"), (3, "lv")]:
-            binary = (mask == label).astype(np.uint8)
-            if binary.sum() == 0:
-                continue
-            stl_path = self._mask_to_stl(binary, spacing_mm, tmp_dir / f"{name}.stl")
-            stl_files[label] = stl_path
-        return stl_files
-
     def _mask_to_stl(self, binary_mask, spacing_mm, output_path):
-        try:
-            from skimage.measure import marching_cubes
-            from skimage.filters import gaussian
-            smoothed = gaussian(binary_mask.astype(float), sigma=1.0)
-            verts, faces, normals, _ = marching_cubes(smoothed, level=0.5, spacing=spacing_mm, allow_degenerate=False)
-            self._write_stl(verts, faces, normals, output_path)
-        except Exception:
-            self._bbox_to_stl(binary_mask, spacing_mm, output_path)
+        from skimage.measure import marching_cubes
+        from skimage.filters import gaussian
+        from scipy import ndimage
+        # Remplir les trous internes coupe par coupe (le myocarde en anneau
+        # peut avoir des trous dus au bruit de segmentation)
+        filled = ndimage.binary_closing(binary_mask, iterations=2).astype(float)
+        # Lissage gaussien plus fort => surface plus reguliere, maillable
+        smoothed = gaussian(filled, sigma=1.5)
+        verts, faces, normals, _ = marching_cubes(
+            smoothed, level=0.5, spacing=spacing_mm, allow_degenerate=False)
+        self._write_stl(verts, faces, normals, output_path)
         return output_path
 
     def _write_stl(self, verts, faces, normals, path):
@@ -95,56 +95,63 @@ class CardiacMesher:
                 f.write("    endloop\n  endfacet\n")
             f.write("endsolid cardiac\n")
 
-    def _bbox_to_stl(self, mask, spacing_mm, path):
-        coords = np.argwhere(mask > 0)
-        if len(coords) == 0:
-            return
-        mins = coords.min(axis=0) * np.array(spacing_mm)
-        maxs = coords.max(axis=0) * np.array(spacing_mm)
-        verts = np.array([[mins[2],mins[1],mins[0]],[maxs[2],mins[1],mins[0]],
-                          [maxs[2],maxs[1],mins[0]],[mins[2],maxs[1],mins[0]],
-                          [mins[2],mins[1],maxs[0]],[maxs[2],mins[1],maxs[0]],
-                          [maxs[2],maxs[1],maxs[0]],[mins[2],maxs[1],maxs[0]]])
-        faces = np.array([[0,1,2],[0,2,3],[4,6,5],[4,7,6],[0,5,1],[0,4,5],
-                          [2,6,7],[2,7,3],[0,3,7],[0,7,4],[1,5,6],[1,6,2]])
-        self._write_stl(verts, faces, np.zeros((len(faces), 3)), path)
-
-    def _run_gmsh(self, stl_files, e_min, e_max, tmp_dir):
+    def _run_gmsh(self, myo_stl, e_min, e_max, tmp_dir):
         try:
             import gmsh
             gmsh.initialize()
             gmsh.option.setNumber("General.Terminal", 0)
             gmsh.option.setNumber("Mesh.CharacteristicLengthMin", e_min)
             gmsh.option.setNumber("Mesh.CharacteristicLengthMax", e_max)
-            gmsh.option.setNumber("Mesh.Algorithm3D", 4)
+            gmsh.option.setNumber("Mesh.Algorithm3D", 1)   # Delaunay
             gmsh.option.setNumber("Mesh.Optimize", 1)
             try:
-                gmsh.model.add("cardiac")
-                for label, stl_path in stl_files.items():
-                    if stl_path.exists():
-                        gmsh.merge(str(stl_path))
-                gmsh.model.mesh.classifySurfaces(np.pi * 40 / 180, True, False, np.pi / 4)
-                gmsh.model.mesh.createGeometry()
-                s = gmsh.model.getEntities(2)
-                l = gmsh.model.geo.addSurfaceLoop([e[1] for e in s])
-                gmsh.model.geo.addVolume([l])
+                gmsh.model.add("myocardium")
+                gmsh.merge(str(myo_stl))
+                # Reconstruction volumique SANS reparametrisation CAO.
+                # classifySurfaces echouait ("Wrong topology for parametrization")
+                # sur les surfaces marching_cubes. On construit le volume
+                # directement depuis le maillage de surface discret.
+                gmsh.model.mesh.createTopology()
+                surfaces = gmsh.model.getEntities(2)
+                if not surfaces:
+                    raise RuntimeError("Aucune surface apres createTopology")
+                sl = gmsh.model.geo.addSurfaceLoop([e[1] for e in surfaces])
+                gmsh.model.geo.addVolume([sl])
                 gmsh.model.geo.synchronize()
                 gmsh.model.mesh.generate(3)
-                node_tags, node_coords, _ = gmsh.model.mesh.getNodes()
-                nodes = node_coords.reshape(-1, 3)
-                elem_types, elem_tags, elem_nodes = gmsh.model.mesh.getElements(3)
-                all_elements, all_tags = [], []
-                for et, etags, enodes in zip(elem_types, elem_tags, elem_nodes):
-                    if et == 4:
-                        all_elements.append(enodes.reshape(-1, 4) - 1)
-                        all_tags.extend([1] * len(etags))
-                if all_elements:
-                    return nodes, np.vstack(all_elements).astype(np.int32), np.array(all_tags, dtype=np.int32)
+
+                nodes, elements, tags = self._extract_gmsh_mesh(gmsh)
+                if elements is not None and len(elements) > 0:
+                    logger.info("mesher.gmsh_success", strategy="mesh_based",
+                                nodes=len(nodes), tets=len(elements))
+                    return nodes, elements, tags
+                logger.warning("mesher.gmsh_no_tets_strategy1")
             finally:
                 gmsh.finalize()
-        except Exception:
-            pass
+        except Exception as e:
+            import traceback
+            logger.error("mesher.gmsh_failed", strategy="mesh_based",
+                         error=str(e), traceback=traceback.format_exc())
+
+        logger.warning("mesher.fallback", msg="⚠️ Maillage fallback trivial (cube) — Gmsh a echoue")
         return self._fallback_mesh(e_max)
+
+    def _extract_gmsh_mesh(self, gmsh):
+        node_tags, node_coords, _ = gmsh.model.mesh.getNodes()
+        nodes = node_coords.reshape(-1, 3)
+        # Remap des tags Gmsh (1-based, potentiellement non contigus) vers 0-based
+        tag_to_idx = {int(t): i for i, t in enumerate(node_tags)}
+        elem_types, elem_tags, elem_nodes = gmsh.model.mesh.getElements(3)
+        all_elements, all_tags = [], []
+        for et, etags, enodes in zip(elem_types, elem_tags, elem_nodes):
+            if et == 4:  # tetraedre
+                conn = enodes.reshape(-1, 4)
+                remapped = np.vectorize(tag_to_idx.get)(conn)
+                all_elements.append(remapped)
+                all_tags.extend([1] * len(etags))
+        if all_elements:
+            return nodes, np.vstack(all_elements).astype(np.int32), np.array(all_tags, dtype=np.int32)
+        return nodes, None, None
 
     def _fallback_mesh(self, e_max):
         nodes = np.array([[0,0,0],[1,0,0],[0,1,0],[1,1,0],
