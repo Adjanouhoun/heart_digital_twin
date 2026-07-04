@@ -599,3 +599,43 @@ Blocage leve : "Airflow deploye mais DAG pas connecte bout-en-bout" (status stri
   En production, l'API d'ingestion cree cette entree avec un vrai consent_id.
 - Etapes DAG 4-7 (simulation openCARP+FEniCSx+WK, validation SLOs) restent en
   scripts separes, pas encore dans le DAG.
+
+---
+## JALON — Mailleur Gmsh myocarde dans le DAG (4 juillet 2026, session 9 suite)
+
+### Contexte
+Le run DAG bout-en-bout produisait un maillage trivial (cube 8 nodes) car
+la tache mesh retombait silencieusement sur un fallback. Objectif : faire
+produire un vrai maillage volumique par Gmsh (outil impose par le projet ;
+TetGen est explicitement ecarte dans la matrice de choix technologiques).
+
+### Diagnostic (grace au logging d'erreur ajoute)
+Trois blocages successifs, reveles un par un :
+1. `No module named 'gmsh'` : gmsh absent du conteneur (pip gmsh n'a pas de
+   wheel ARM/py3.12). Fix : apt install gmsh python3-gmsh + PYTHONPATH vers
+   /usr/lib/python3/dist-packages. gmsh.py est un module Python pur (pas de
+   .so), donc compatible py3.12 malgre compilation Debian.
+2. `Wrong topology of boundary mesh for parametrization` : classifySurfaces +
+   createGeometry echoue sur les surfaces marching_cubes (non-manifold). C'est
+   le bug documente dans l'audit (9 tentatives). Fix : approche mesh-based
+   (createTopology + addSurfaceLoop + addVolume) SANS reparametrisation CAO.
+3. `Netgen optimizer is not compiled in this version` : option Mesh.OptimizeNetgen
+   absente du build apt. Fix : retiree.
+
+### Decision conforme au projet : MYOCARDE seul
+On maille le myocarde (label 2) uniquement, pas les 3 organes fusionnes.
+Justification : LDRB (fibres, impose) opere entre endocarde/epicarde du muscle ;
+openCARP (EP monodomaine) simule dans le tissu musculaire. Les cavites VG/VD
+sont du sang, pas un domaine de simulation. Mailler les 3 serait une erreur
+physiologique.
+
+### Resultat patient001
+- mesher.gmsh_success : 110391 nodes, 466955 tets (strategy=mesh_based)
+- vs cube 8 nodes avant
+
+### Points ouverts (prochain raffinement)
+- Maillage TROP dense (110K nodes vs 6-14K du pipeline openCARP valide).
+  Taille element 0.5-1.5mm trop fine pour un coeur entier. A augmenter.
+- QC bug : min_jacobian=0.0 mais qc_passed=True. La condition min_jacobian>0
+  devrait echouer. Elements degeneres a filtrer (cf. fix h_min>=0.3mm audit).
+- Contrat maillage->openCARP : coordonnees en um (mm x1000) a verifier.
