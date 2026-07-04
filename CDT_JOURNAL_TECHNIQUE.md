@@ -540,3 +540,20 @@ APD tronque car tend=50ms (besoin 500ms pour APD complet).
 8/10 patients : pipeline reel complet
 2 divergent : patient002 (45.7% act) et patient003 (58.2% act)
 Cause : trop d'elements actifs → stress field trop fort pour Newton
+
+---
+## D1.1 ACDC — CONFORME (4 juillet 2026)
+
+### Validation finale nnU-Net v2 (vrais NIfTI, 1000 epochs, A100) :
+  Mean Dice = 0.9205
+  RV  = 0.9040 (SLO >= 0.85) CONFORME
+  MYO = 0.9104 (SLO >= 0.90) CONFORME
+  LV  = 0.9471 (SLO >= 0.90) CONFORME
+
+  Checkpoint: ~/nnunet/results_nifti/.../checkpoint_best.pth
+  Lecon: vrais NIfTI avec spacing correct = +0.023 vs H5
+
+### Etat livrables :
+  D1.1 ACDC : CONFORME (MYO=0.910)
+  M&Ms      : Colab en cours
+  EMIDEC    : a faire
