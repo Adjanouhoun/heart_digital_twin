@@ -134,6 +134,7 @@ services:
       - "8000:8000"
     volumes:
       - ./app:/app/app
+      - ./reports/meshes_acdc/meshes:/app/data/meshes
     networks: [cdt-net]
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 

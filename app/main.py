@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.api.cdt_endpoints import router as cdt_router
 from app.config import get_settings, Settings
 from app.registry.database import init_db, get_session
 from app.registry.models import Twin, IngestionJob, AuditLog
@@ -33,6 +34,7 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+app.include_router(cdt_router)
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"], allow_headers=["*"])
 Instrumentator().instrument(app).expose(app, endpoint="/metrics")

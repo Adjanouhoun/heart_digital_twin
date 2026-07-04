@@ -21,10 +21,12 @@ from enum import Enum
 from typing import Optional, Dict
 
 import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from pydantic import BaseModel
 
+router = APIRouter(prefix="/api/v1")
 app = FastAPI(title="Cardiac Digital Twin API", version="1.0.0")
+app.include_router(router)
 
 
 class TwinState(str, Enum):
@@ -88,12 +90,12 @@ class SimulationResults(BaseModel):
     output_vector: list = []
 
 
-@app.get("/api/v1/health")
+@router.get("/health")
 async def health():
     return {"status": "ok", "version": "1.0.0", "sessions": len(sessions)}
 
 
-@app.post("/api/v1/twin/create")
+@router.post("/twin/create")
 async def create_twin(req: CreateTwinRequest):
     twin_id = str(uuid.uuid4())[:8]
     session = TwinSession(twin_id, req.patient_id)
@@ -101,7 +103,7 @@ async def create_twin(req: CreateTwinRequest):
     return {"twin_id": twin_id, "state": session.state, "patient_id": req.patient_id}
 
 
-@app.get("/api/v1/twin/{twin_id}/state")
+@router.get("/twin/{twin_id}/state")
 async def get_state(twin_id: str):
     if twin_id not in sessions:
         raise HTTPException(status_code=404, detail="Twin not found")
@@ -112,7 +114,7 @@ async def get_state(twin_id: str):
     )
 
 
-@app.post("/api/v1/twin/simulate")
+@router.post("/twin/simulate")
 async def simulate(req: SimulateRequest):
     if req.twin_id not in sessions:
         raise HTTPException(status_code=404, detail="Twin not found")
@@ -125,7 +127,7 @@ async def simulate(req: SimulateRequest):
         from app.solver.coupled_solver import CoupledSolver, SimulationParameters
         import os
 
-        mesh_dir = os.path.expanduser("~/cdt/reports/meshes_acdc/meshes")
+        mesh_dir = os.environ.get("CDT_MESH_DIR", "/app/data/meshes")
         pid = session.patient_id
 
         with open(f"{mesh_dir}/{pid}.pts") as f:
@@ -162,7 +164,7 @@ async def simulate(req: SimulateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/twin/{twin_id}/results")
+@router.get("/twin/{twin_id}/results")
 async def get_results(twin_id: str):
     if twin_id not in sessions:
         raise HTTPException(status_code=404, detail="Twin not found")
@@ -175,7 +177,7 @@ async def get_results(twin_id: str):
     })
 
 
-@app.websocket("/api/v1/twin/{twin_id}/stream")
+@router.websocket("/twin/{twin_id}/stream")
 async def stream_twin(websocket: WebSocket, twin_id: str):
     await websocket.accept()
 
@@ -208,7 +210,7 @@ async def stream_twin(websocket: WebSocket, twin_id: str):
                 from app.solver.coupled_solver import CoupledSolver, SimulationParameters
                 import os
 
-                mesh_dir = os.path.expanduser("~/cdt/reports/meshes_acdc/meshes")
+                mesh_dir = os.environ.get("CDT_MESH_DIR", "/app/data/meshes")
                 pid = session.patient_id
 
                 with open(f"{mesh_dir}/{pid}.pts") as f:
