@@ -91,12 +91,35 @@ class NNUNetV2Segmenter:
 
         network = self._build_network(device)
         ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
-        network.load_state_dict(ckpt["network"])
+
+        # Deux formats de checkpoint supportes :
+        #  - nnU-Net v2 officiel (nnUNetTrainer) : cle "network_weights",
+        #    metadonnees "current_epoch" / "_best_ema"
+        #  - script custom train_mps_v2.py : cle "network", "epoch" / "best_val_dice"
+        if "network_weights" in ckpt:
+            state_dict = ckpt["network_weights"]
+            self.epoch = ckpt.get("current_epoch", "?")
+            self.best_val_dice = ckpt.get("_best_ema", "?")
+            ckpt_format = "nnunet-v2-official"
+        elif "network" in ckpt:
+            state_dict = ckpt["network"]
+            self.epoch = ckpt.get("epoch", "?")
+            self.best_val_dice = ckpt.get("best_val_dice", "?")
+            ckpt_format = "custom-train-script"
+        else:
+            raise KeyError(
+                "Checkpoint invalide : ni 'network_weights' ni 'network' trouve. "
+                f"Cles disponibles : {list(ckpt.keys())}"
+            )
+
+        network.load_state_dict(state_dict)
         network.eval()
         self.network = network
-        self.epoch = ckpt.get("epoch", "?")
-        self.best_val_dice = ckpt.get("best_val_dice", "?")
-        self.model_name = f"nnunet-v2-acdc-epoch{self.epoch}-dice{self.best_val_dice}"
+        try:
+            dice_str = f"{float(self.best_val_dice):.4f}"
+        except (ValueError, TypeError):
+            dice_str = str(self.best_val_dice)
+        self.model_name = f"nnunet-v2-acdc-{ckpt_format}-epoch{self.epoch}-ema{dice_str}"
 
         logger.info("nnunet_segmenter.loaded",
                     checkpoint=checkpoint_path, epoch=self.epoch,
