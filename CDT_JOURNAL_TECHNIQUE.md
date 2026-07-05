@@ -676,3 +676,45 @@ target_mm dans _mask_to_stl controle la densite :
 1.5mm -> ~57K, 2.0mm -> ~25K, 2.5mm -> ~15K.
 Valeur optimale a fixer quand openCARP sera branche dans le DAG (critere reel :
 temps de simulation + convergence PETSc), pas avant.
+
+---
+## DIAGNOSTIC openCARP — Test sur vrai maillage + bug dt majeur (4 juillet 2026, session 9 fin)
+
+### Objectif (conforme audit Jalon 1)
+Valider openCARP sur un vrai maillage patient AVANT de l'integrer au DAG.
+
+### Acquis SOLIDES
+- openCARP FONCTIONNE et CONVERGE sur patient003 : Code=0, vm.igb 2.8MB produit.
+  Binaire : /usr/local/bin/openCARP.par (git tag a86f7c4), Mach-O arm64.
+- Filtrage h_min>=0.3mm ESSENTIEL : sur patient003, 75440/124568 tets etaient
+  des slivers (60%). Sans filtrage -> divergence. Maillage final 19293 nodes.
+- Densite cible openCARP confirmee : ~15-20K nodes (patient003 = 19K converge).
+  => le maillage Gmsh du DAG (57K a target_mm=1.5) est TROP DENSE, viser 2.5mm.
+- Pipeline valide : scripts/run_opencarp_patient.py (charge mesh mm -> filtre
+  slivers -> mm_to_um -> fix_element_orientation -> par -> mpirun openCARP.par).
+
+### BUG MAJEUR TROUVE : dt interprete en microsecondes
+Le generateur opencarp_config.py ecrit "dt = 0.02" en PENSANT millisecondes.
+Mais openCARP lit dt en MICROSECONDES (cf. exemples officiels : "dt = 20 # in
+microseconds"). Donc dt=0.02us au lieu de 20us => pas de temps 1000x trop petit
+=> 1000x trop de pas => c'est la cause des 37min/50ms observees.
+CORRECTION A FAIRE : dt = 20 (us), pas 0.02.
+
+### Syntaxe .par OBSOLETE dans le generateur
+La version installee (a86f7c4) a change la syntaxe vs le generateur actuel :
+- dt en us (pas ms)
+- bidomain = 0 pour monodomaine (ligne manquante dans le generateur)
+- parab_solve = 1 (Crank-Nicolson, manquant)
+- imp_region[0].ID = 1  (PAS .ID[0] = 1)
+- gregion[0].ID = 1     (PAS .ID[0] = 1)
+- stimulus[0].* obsolete -> nouvelle syntaxe stim[0].name / .crct.type /
+  .pulse.strength / .ptcl.start / .ptcl.duration
+Reference officielle : /usr/local/lib/opencarp/share/examples/02_EP_tissue/
+
+### POINT OUVERT (prochaine session)
+Localisation du stimulus : la nouvelle syntaxe ne definit PAS la position via
+stim[0].elec.p0[...] (cause des "Error reading parameters"). Les exemples
+complexes (reentry) definissent le stimulus via run.py/carputils, pas dans le
+.par. A investiguer : mecanisme .vtx ou stim[0].elec.geom_type pour localiser
+le stimulus a l'apex. Une fois resolu -> corriger opencarp_config.py -> retester
+patient003 (attendu ~2min au lieu de 37) -> puis integrer au DAG.
