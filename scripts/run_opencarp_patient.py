@@ -93,10 +93,10 @@ def main():
         float(nodes_um[:, 2].min() - 100)
     )
 
-    stim_radius = float(max(
-        nodes_um[:, 0].max() - nodes_um[:, 0].min(),
-        nodes_um[:, 1].max() - nodes_um[:, 1].min()
-    ) / 2 + 200)
+    # Stimulus local a l'apex : sphere de 3mm de rayon (physiologique).
+    # L'onde d'activation part de l'apex et se propage — un stimulus local
+    # est requis pour mesurer le temps d'activation (SLO benchmark +/-5ms).
+    stim_radius = 3000.0  # um = 3mm
 
     par = generate_par_file(
         mesh_path=str(work_dir / "mesh"),
@@ -105,16 +105,6 @@ def main():
         apex_um=apex_um,
         stim_radius_um=stim_radius,
         bcl_ms=args.tend,
-    )
-
-    stim_z_max = z_10pct
-    par = par.replace(
-        f"stimulus[0].z0 = {apex_um[2] - stim_radius:.0f}",
-        f"stimulus[0].z0 = {nodes_um[:, 2].min() - 100:.0f}"
-    )
-    par = par.replace(
-        f"stimulus[0].zd = {2 * stim_radius:.0f}",
-        f"stimulus[0].zd = {stim_z_max - nodes_um[:, 2].min() + 200:.0f}"
     )
 
     (work_dir / "sim.par").write_text(par)

@@ -718,3 +718,36 @@ complexes (reentry) definissent le stimulus via run.py/carputils, pas dans le
 .par. A investiguer : mecanisme .vtx ou stim[0].elec.geom_type pour localiser
 le stimulus a l'apex. Une fois resolu -> corriger opencarp_config.py -> retester
 patient003 (attendu ~2min au lieu de 37) -> puis integrer au DAG.
+
+---
+## JALON MAJEUR — openCARP debloque + chaine anatomie->simulation validee (5 juillet 2026)
+
+### Bottleneck openCARP RESOLU (facteur ~780x)
+Le generateur opencarp_config.py a ete reecrit pour la syntaxe openCARP a86f7c4.
+3 causes racines corrigees (via lecture spec +Help + exemples officiels) :
+1. dt en MICROSECONDES : dt=0.02 (lu 0.02us) -> dt=20 (20us). Cause des 37min.
+2. bidomain=0 + parab_solve=1 : monodomaine explicite (Crank-Nicolson).
+3. Syntaxe : imp_region[0].ID (pas .ID[0]), stim[0].* nouvelle syntaxe,
+   stim[0].elec.geom_type=1 (sphere), p0 (centre um), radius=3000um.
+   timedt plafonne a tend (openCARP exige timedt <= tend).
+
+Resultat patient003 (19K nodes, 50ms) : 37min -> 2.8s. Code=0, vm.igb 2.8MB.
+
+### Chaine complete anatomie->simulation VALIDEE bout-en-bout
+Test openCARP sur le maillage GMSH du DAG (patient001, twin_test001/job_mesh_v6) :
+- 57058 nodes, 251533 tets
+- Filtrage slivers h_min>=0.3mm : removed 0 tets (!) — le mailleur Gmsh produit
+  un maillage DEJA PROPRE (vs 60% de slivers sur l'ancien TetGen patient003).
+- openCARP : Code=0, 6 secondes, vm.igb 6.5MB.
+
+=> Preuve : nnU-Net -> maillage Gmsh (57K, 0 sliver) -> openCARP (Code=0) marche.
+=> Question densite tranchee : 57K est exploitable (6s), target_mm=1.5 valide.
+=> Le maillage Gmsh est de MEILLEURE qualite que l'ancien TetGen (0 vs 60% slivers).
+
+### Points ouverts (prochaine session)
+- Porter le fix .par dans app/solver/ep/opencarp_solver.py (module du DAG) :
+  meme correction de generation (il utilise generate_par_file, donc herite du fix,
+  MAIS verifier _check_opencarp cherche "openCARP.par" et le lancement).
+- Valider le temps d'activation vs benchmark (parser vm.igb via igb_parser.py) —
+  SLO D2.1 : activation +/-5ms.
+- Puis integrer la tache EP openCARP dans le DAG (apres fibers).
