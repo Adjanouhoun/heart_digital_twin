@@ -751,3 +751,39 @@ Test openCARP sur le maillage GMSH du DAG (patient001, twin_test001/job_mesh_v6)
 - Valider le temps d'activation vs benchmark (parser vm.igb via igb_parser.py) —
   SLO D2.1 : activation +/-5ms.
 - Puis integrer la tache EP openCARP dans le DAG (apres fibers).
+
+---
+## JALON — Chaine de delegation openCARP validee (EF=60%) (5 juillet 2026)
+
+### Architecture retenue (option C, pragmatique)
+openCARP est natif M1 (pas dans le conteneur Airflow). Plutot que de l'installer
+dans Docker (lourd, instable), le DAG DELEGUE la simulation a un Solver API
+FastAPI tournant EN LOCAL (port 8001), la ou openCARP est installe.
+  DAG Airflow (Docker) -> maillage+fibres -> MinIO
+        -> HTTP POST /v1/simulate -> Solver API (local M1) -> openCARP reel
+
+### Corrections
+1. opencarp_solver.py (module du DAG/API) : supprime son _generate_par_file
+   DUPLIQUE et bugge. Utilise desormais generate_par_file de opencarp_config
+   (source unique). Applique le pipeline valide : filter slivers h_min>=0.3mm
+   -> mm_to_um -> fix_element_orientation. _write_mesh_files renomme _um.
+2. solver_api.py : _run_simulation chargeait un maillage ALEATOIRE (stub 50 nodes).
+   Remplace par _load_mesh_from_minio reel (.pts/.elem/.lon depuis MinIO).
+   S3_ENDPOINT configurable (localhost:9000 en local, minio:9000 en conteneur).
+
+### Validation
+Test module opencarp_solver direct (patient001 Gmsh, 57K nodes) :
+  CV=0.5 m/s, APD90=280ms, benchmark=True (valeurs PHYSIOLOGIQUES).
+Test chaine complete via Solver API (POST /v1/simulate, maillage MinIO) :
+  status=done, ef_pct=60.0, cv_ms=0.5, p_systolic=154 mmHg, benchmark_passed=true,
+  duree 49s (EP+Windkessel couples, 100ms).
+
+=> EF=60% = fraction d'ejection PHYSIOLOGIQUE (normal 50-70%).
+=> Chaine nnU-Net -> Gmsh -> MinIO -> Solver API -> openCARP+Windkessel VALIDEE.
+
+### Points ouverts
+- p_systolic 154 mmHg un peu haute : parametres Windkessel non calibres patient.
+- FEniCSx encore en fallback (mecanique Holzapfel-Ogden pas branchee) : l'EF vient
+  du couplage EP+Windkessel, pas encore de la vraie deformation mecanique.
+- boto3 requis dans le venv local du Solver API (installe).
+- Reste : ajouter la tache DAG qui appelle POST /v1/simulate apres fibers.

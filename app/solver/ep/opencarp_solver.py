@@ -120,26 +120,52 @@ class OpenCARPSolver:
 
     def _run_opencarp(self, params, nodes, elements, fiber_vectors, twin_id, job_id):
         """Lance openCARP via subprocess (binaire local)."""
+        from app.core.units import mm_to_um, filter_small_elements, fix_element_orientation
+        from app.solver.ep.opencarp_config import generate_par_file
+
         work_dir = self._work_dir / job_id
         work_dir.mkdir(parents=True, exist_ok=True)
-        self._write_mesh_files(work_dir, nodes, elements, fiber_vectors)
-        # Calculer la position de l'apex (point le plus bas en Z)
-        apex_idx = int(np.argmin(nodes[:, 2]))
-        apex_x, apex_y, apex_z = nodes[apex_idx]
-        par_file = self._generate_par_file(work_dir, params, apex_x, apex_y, apex_z)
 
-        cmd = [
-            "mpirun", "-n", "1",
-            "openCARP.par", "+F", str(par_file),
-        ]
+        # Contrat openCARP : maillage en um + filtrage slivers (h_min>=0.3mm) +
+        # orientation des elements corrigee. Meme pipeline que le script valide
+        # scripts/run_opencarp_patient.py.
+        elements_f, n_removed = filter_small_elements(nodes, elements.tolist(), 0.3)
+        keep = sorted(set(v for e in elements_f for v in e))
+        node_map = {old: new for new, old in enumerate(keep)}
+        nodes_kept_mm = nodes[keep]
+        elements_kept = [[node_map[v] for v in e] for e in elements_f]
+        nodes_um = mm_to_um(nodes_kept_mm)
+        elements_kept, _ = fix_element_orientation(nodes_um, elements_kept)
 
+        # Reindexer les fibres sur les noeuds gardes
+        fibers_kept = fiber_vectors[keep] if fiber_vectors is not None else None
+        self._write_mesh_files_um(work_dir, nodes_um, elements_kept, fibers_kept)
+
+        # Apex = point le plus bas en Z (um), stimulus sphere locale 3mm
+        apex_um = (
+            float(nodes_um[:, 0].mean()),
+            float(nodes_um[:, 1].mean()),
+            float(nodes_um[:, 2].min() - 100),
+        )
+        par_content = generate_par_file(
+            mesh_path=str(work_dir / "mesh"),
+            output_path=str(work_dir / "output"),
+            tend_ms=params.duration_ms,
+            apex_um=apex_um,
+            stim_radius_um=3000.0,
+            bcl_ms=min(params.bcl_ms, params.duration_ms),
+        )
+        par_file = work_dir / "sim.par"
+        par_file.write_text(par_content)
+
+        cmd = ["mpirun", "-n", "1", "openCARP.par", "+F", str(par_file)]
         proc = subprocess.run(cmd, capture_output=True, text=True,
                              timeout=max(300, params.duration_ms * 10), cwd=str(work_dir))
 
         if proc.returncode != 0:
             raise RuntimeError(f"openCARP failed: {proc.stderr[-500:]}")
 
-        return self._parse_opencarp_output(work_dir, twin_id, job_id, nodes)
+        return self._parse_opencarp_output(work_dir, twin_id, job_id, nodes_kept_mm)
 
     def _run_fallback(self, params, nodes, elements, fiber_vectors, twin_id, job_id):
         """Simulation EP analytique — propagation d'onde sphérique depuis l'apex."""
@@ -178,43 +204,7 @@ class OpenCARPSolver:
             solver_version="fallback-analytical-NOT-FOR-CLINICAL-USE",
         )
 
-    def _generate_par_file(self, work_dir, params, apex_x=0, apex_y=0, apex_z=0):
-        par_content = f"""
-meshname = {work_dir}/mesh
-num_imp_regions = 1
-imp_region[0].im = {params.ionic_model}
-imp_region[0].num_IDs = 1
-imp_region[0].ID[0] = 1
-num_gregions = 1
-gregion[0].num_IDs = 1
-gregion[0].ID[0] = 1
-gregion[0].g_il = {params.sigma_l * 1000:.4f}
-gregion[0].g_it = {params.sigma_t * 1000:.4f}
-num_stim = 1
-stimulus[0].name = apical_stim
-stimulus[0].stimtype = 0
-stimulus[0].strength = {params.stim_amplitude_uA:.1f}
-stimulus[0].duration = {params.stim_duration_ms:.2f}
-stimulus[0].start = {params.stim_start_ms:.2f}
-stimulus[0].bcl = {min(params.bcl_ms, params.duration_ms):.1f}
-stimulus[0].npls = 1
-stimulus[0].x0 = {apex_x - 2:.1f}
-stimulus[0].xd = 4.0
-stimulus[0].y0 = {apex_y - 2:.1f}
-stimulus[0].yd = 4.0
-stimulus[0].z0 = {apex_z - 2:.1f}
-stimulus[0].zd = 4.0
-simID = {work_dir}/output
-tend = {params.duration_ms:.1f}
-spacedt = 1
-timedt = 1.0
-dt = {params.dt_ms:.4f}
-"""
-        par_path = work_dir / "sim.par"
-        par_path.write_text(par_content)
-        return par_path
-
-    def _write_mesh_files(self, work_dir, nodes, elements, fiber_vectors):
+    def _write_mesh_files_um(self, work_dir, nodes, elements, fiber_vectors):
         pts_lines = [str(len(nodes))]
         for n in nodes:
             pts_lines.append(f"{n[0]:.6f} {n[1]:.6f} {n[2]:.6f}")
