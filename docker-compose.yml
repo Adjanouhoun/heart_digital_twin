@@ -258,6 +258,8 @@ services:
     ports:
       - "8080:8080"
     networks: [cdt-net]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: webserver
 
   airflow-scheduler:
@@ -281,6 +283,8 @@ services:
       - ./app:/opt/airflow/app
       - ./models:/opt/airflow/models
     networks: [cdt-net]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: scheduler
 
   # ── CDT Solver (FEniCSx + openCARP) ──────────────

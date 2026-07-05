@@ -787,3 +787,37 @@ Test chaine complete via Solver API (POST /v1/simulate, maillage MinIO) :
   du couplage EP+Windkessel, pas encore de la vraie deformation mecanique.
 - boto3 requis dans le venv local du Solver API (installe).
 - Reste : ajouter la tache DAG qui appelle POST /v1/simulate apres fibers.
+
+---
+## JALON MAJEUR — Pipeline complet IRM->EF dans le DAG (5 juillet 2026)
+
+### Tache ep_simulation integree au DAG
+Le DAG cardiac_reconstruction va desormais de l'IRM jusqu'a la simulation couplee :
+  start -> preprocess -> segment -> mesh -> qc_mesh -> fibers -> ep_simulation
+        -> register_results -> end   (9/9 taches success)
+
+La tache ep_simulation DELEGUE au Solver API local (host.docker.internal:8001) :
+recupere les cles MinIO (pts/elem/lon) via XCom, POST /v1/simulate, polling du
+resultat, push EF/pression/CV en XCom.
+
+### Deux corrections reseau/concurrence
+1. Docker->host : ajout de extra_hosts "host.docker.internal:host-gateway" aux
+   services airflow-scheduler et airflow-webserver (le conteneur ne joignait pas
+   le host sur le reseau custom cdt-net). + Solver API lance avec --host 0.0.0.0.
+2. Solver API gelait sur le polling : _run_simulation etait lancee en
+   BackgroundTasks FastAPI, mais le subprocess.run openCARP BLOQUANT gelait
+   l'event loop mono-worker (ReadTimeout meme a 30s). Corrige : lancement dans
+   un threading.Thread daemon (_run_simulation_sync) qui libere l'event loop.
+
+### Resultat (run job_ep_v3, patient001, 9/9 success)
+EF=60.0%, P_sys=154.1 mmHg, CV=0.5 m/s (identiques au test API direct = coherence).
+Duree ep_simulation ~70s. Pipeline total ~4min.
+
+=> Les etapes 1-6 du schema (IRM -> anonymisation -> segmentation -> maillage ->
+   fibres -> simulation couplee EP+Windkessel) fonctionnent en UN pipeline orchestre.
+
+### Points ouverts
+- p_systolic 154 mmHg : Windkessel non calibre patient.
+- FEniCSx en fallback (mecanique Holzapfel-Ogden pas branchee).
+- _jobs en memoire dans le Solver API : OK en mono-worker, necessiterait Redis
+  pour du multi-worker (pas requis actuellement).

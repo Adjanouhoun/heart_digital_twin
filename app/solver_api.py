@@ -68,6 +68,7 @@ async def health():
 
 @app.post("/v1/simulate", status_code=202, tags=["Simulation"])
 async def launch_simulation(request: SimulationRequest, background_tasks: BackgroundTasks):
+    import threading
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {
         "job_id": job_id,
@@ -75,7 +76,10 @@ async def launch_simulation(request: SimulationRequest, background_tasks: Backgr
         "status": "pending",
         "created_at": datetime.utcnow().isoformat(),
     }
-    background_tasks.add_task(_run_simulation, job_id, request)
+    # Thread separe (pas BackgroundTasks FastAPI) : _run_simulation fait un
+    # subprocess.run openCARP BLOQUANT qui gelerait l'event loop mono-worker
+    # et empecherait de repondre au polling. Un thread libere l'event loop.
+    threading.Thread(target=_run_simulation_sync, args=(job_id, request), daemon=True).start()
     return {"status": "accepted", "job_id": job_id, "poll_url": f"/v1/jobs/{job_id}"}
 
 
@@ -99,7 +103,7 @@ async def launch_doe(twin_id: str, n_simulations: int = 500, background_tasks: B
     return {"status": "accepted", "doe_id": doe_id, "poll_url": f"/v1/jobs/{doe_id}"}
 
 
-async def _run_simulation(job_id: str, request: SimulationRequest):
+def _run_simulation_sync(job_id: str, request: SimulationRequest):
     import numpy as np
     from app.solver.coupled_solver import CoupledSolver, SimulationParameters
     _jobs[job_id]["status"] = "running"

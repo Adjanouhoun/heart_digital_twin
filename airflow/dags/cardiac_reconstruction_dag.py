@@ -301,6 +301,73 @@ def fibers(**context):
     return {"status": "ok", "lon_key": lon_key}
 
 
+def run_ep_simulation(**context):
+    """Delegue la simulation EP+hemodynamique au Solver API local (openCARP natif).
+
+    Le DAG tourne dans Docker ; openCARP est natif sur le host M1. On appelle
+    donc le Solver API du host via host.docker.internal:8001 (option C, validee).
+    Le maillage a deja ete ecrit dans MinIO par les taches mesh + fibers.
+    """
+    import os
+    import hashlib
+    import requests
+
+    ti = context["ti"]
+    params = context["params"]
+    twin_id = params["twin_id"]
+    job_id = params["job_id"]
+
+    pts_key  = ti.xcom_pull(task_ids="mesh",   key="pts_key")
+    elem_key = ti.xcom_pull(task_ids="mesh",   key="elem_key")
+    lon_key  = ti.xcom_pull(task_ids="fibers", key="lon_key")
+
+    # Le Solver API attend un twin_id au format hash 64 hex ; on derive un hash
+    # stable du twin_id metier (le vrai twin_id reste dans le registre PostgreSQL).
+    twin_hash = hashlib.sha256(twin_id.encode()).hexdigest()
+
+    solver_url = os.environ.get("SOLVER_API_URL", "http://host.docker.internal:8001")
+
+    payload = {
+        "twin_id": twin_hash,
+        "mesh_pts_key": pts_key,
+        "mesh_elem_key": elem_key,
+        "mesh_lon_key": lon_key,
+        "duration_ms": float(params.get("ep_duration_ms", 100.0)),
+    }
+
+    print(f"[{job_id}] Delegation EP -> {solver_url}/v1/simulate")
+    resp = requests.post(f"{solver_url}/v1/simulate", json=payload, timeout=30)
+    resp.raise_for_status()
+    sim_job_id = resp.json()["job_id"]
+    print(f"[{job_id}] Simulation lancee, sim_job_id={sim_job_id}")
+
+    # Polling du resultat (la simulation couplee prend ~1min)
+    import time
+    result = None
+    for _ in range(60):  # jusqu'a ~5min
+        time.sleep(5)
+        r = requests.get(f"{solver_url}/v1/jobs/{sim_job_id}", timeout=30)
+        r.raise_for_status()
+        status = r.json()
+        if status["status"] == "done":
+            result = status
+            break
+        if status["status"] == "failed":
+            raise RuntimeError(f"Simulation echouee: {status.get('error')}")
+
+    if result is None:
+        raise TimeoutError(f"Simulation {sim_job_id} pas terminee dans le delai")
+
+    print(f"[{job_id}] EP OK: EF={result.get('ef_pct')}%, "
+          f"P_sys={result.get('p_systolic_mmHg')}mmHg, CV={result.get('cv_ms')}m/s")
+
+    ti.xcom_push(key="ef_pct",           value=result.get("ef_pct"))
+    ti.xcom_push(key="p_systolic_mmHg",  value=result.get("p_systolic_mmHg"))
+    ti.xcom_push(key="cv_ms",            value=result.get("cv_ms"))
+    ti.xcom_push(key="ep_benchmark",     value=result.get("benchmark_passed"))
+    return {"status": "ok", "ef_pct": result.get("ef_pct")}
+
+
 def register_results(**context):
     """Enregistre tous les résultats dans PostgreSQL."""
     import sys, psycopg2
@@ -402,6 +469,12 @@ with dag:
         doc_md="**Fibres** : LDRB Bayer 2012 → orientations myocardiques (.lon)",
     )
 
+    t_ep = PythonOperator(
+        task_id="ep_simulation",
+        python_callable=run_ep_simulation,
+        doc_md="**EP** : delegation openCARP+Windkessel au Solver API local (host)",
+    )
+
     t_register = PythonOperator(
         task_id="register_results",
         python_callable=register_results,
@@ -409,4 +482,4 @@ with dag:
     )
 
     # DAG : séquentiel avec QC bloquant
-    start >> t_preprocess >> t_segment >> t_mesh >> t_qc >> t_fibers >> t_register >> end
+    start >> t_preprocess >> t_segment >> t_mesh >> t_qc >> t_fibers >> t_ep >> t_register >> end
