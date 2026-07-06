@@ -821,3 +821,55 @@ Duree ep_simulation ~70s. Pipeline total ~4min.
 - FEniCSx en fallback (mecanique Holzapfel-Ogden pas branchee).
 - _jobs en memoire dans le Solver API : OK en mono-worker, necessiterait Redis
   pour du multi-worker (pas requis actuellement).
+
+---
+## JALON — openCARP conteneurise (image officielle) pour paralleliser le DoE (6 juillet 2026)
+
+### Contexte
+Pour paralleliser le DoE (500 sims, ~200s/sim couplee = ~28h), tentative de
+compiler openCARP depuis les sources pour Linux/ARM64 (Docker Desktop M1),
+en plus du binaire natif M1 deja valide.
+
+### Tentative de compilation maison : ABANDONNEE
+Dockerfile.opencarp (build depuis les sources, tag a86f7c4, meme commit que
+le binaire natif) a bute sur une succession d'erreurs resolues une a une :
+gengetopt manquant -> petsc-dev manquant -> mauvais noms de cibles CMake
+(carp.pt n'existe pas ; vraies cibles : opencarp-bin, bench-bin, mesher-bin)
+-> ECHEC FINAL au linkage : "cannot find -lLIB_hdf5-NOTFOUND" (variable CMake
+HDF5 non resolue pour openCARP specifiquement, bien qu'HDF5 soit installe).
+Dockerfile abandonne et supprime (openCARP.org publie une image officielle,
+plus fiable que reparer notre build maison).
+
+### Solution retenue : image Docker OFFICIELLE openCARP
+docker.opencarp.org/opencarp/opencarp (voir https://opencarp.org/download/installation/install-docker)
+- arm64 natif (pas d'emulation sur M1)
+- Digest EPINGLE (pas ":latest") pour reproductibilite stricte :
+  docker.opencarp.org/opencarp/opencarp@sha256:206c525e8b53caa67132a413c4b95cd005085c1578fd6f5ca8cc2f442a179204
+- Version interne : commit 0087e4d (DIFFERENT du binaire natif a86f7c4 -
+  plus recent). Ecart juge acceptable : equations physiques de base
+  (monodomaine, tenTusscherPanfilov, gregion) inchangees entre versions.
+
+### Point de compatibilite CRITIQUE : --param-fallback=legacy
+Cette version a un double parser (nouveau + legacy) qui se comparent et
+rejettent l'execution en cas de divergence meme cosmetique (ex: notre
+phys_region[0].name="Intracellular domain" vs attendu "Intracellular").
+OBLIGATOIRE : ajouter --param-fallback=legacy a la ligne de commande.
+
+### Validation (patient001, 57K nodes, meme .par que le natif)
+g_mult=1.0 : actives=26974, t_moyen=30.9ms, t_max=50.0ms
+g_mult=2.0 : actives=45463, t_moyen=28.2ms (propagation plus rapide, coherent)
+=> variance g_mult CONFIRMEE sur cette version aussi. Chaine reutilisable.
+
+### Integration docker-compose.yml
+Service "opencarp" ajoute avec profiles=["tools"] (jamais lance par un simple
+"docker compose up", disponible via "docker compose run --rm opencarp ...").
+Volume relatif ./data/opencarp:/data (portable sur toute machine clonant le repo).
+
+Usage :
+  docker compose run --rm opencarp openCARP +F /data/sim.par --param-fallback=legacy
+
+### Benefice
+Permet de paralleliser le DoE : plusieurs conteneurs opencarp en simultane,
+en plus du binaire natif M1, sans rien casser de l'existant. Portable :
+un chercheur clonant le repo sur une autre machine (sans openCARP compile)
+peut lancer des simulations immediatement via docker compose.

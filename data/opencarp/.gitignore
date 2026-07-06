@@ -1,0 +1,3 @@
+data/opencarp/*
+!data/opencarp/.gitignore
+!data/opencarp/.gitkeep

@@ -135,8 +135,6 @@ services:
     volumes:
       - ./app:/app/app
       - ./reports/meshes_acdc/meshes:/app/data/meshes
-      - ./reports/doe:/app/data/doe
-      - ./models:/app/models
     networks: [cdt-net]
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
@@ -249,7 +247,7 @@ services:
       AIRFLOW__CORE__FERNET_KEY: 'ZmDfcTF7_60GrrY167zsiPd67pEvs0aGOv2oasOM1Pg='
       AIRFLOW__WEBSERVER__SECRET_KEY: 'cdt_airflow_secret_key'
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
-      PYTHONPATH: /opt/airflow:/usr/lib/python3/dist-packages
+      PYTHONPATH: /opt/airflow
       NNUNET_CHECKPOINT_PATH: /opt/airflow/models/checkpoint_best.pth
     volumes:
       - ./airflow/dags:/opt/airflow/dags
@@ -258,8 +256,6 @@ services:
     ports:
       - "8080:8080"
     networks: [cdt-net]
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     command: webserver
 
   airflow-scheduler:
@@ -276,15 +272,13 @@ services:
       AIRFLOW__CORE__FERNET_KEY: 'ZmDfcTF7_60GrrY167zsiPd67pEvs0aGOv2oasOM1Pg='
       AIRFLOW__WEBSERVER__SECRET_KEY: 'cdt_airflow_secret_key'
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
-      PYTHONPATH: /opt/airflow:/usr/lib/python3/dist-packages
+      PYTHONPATH: /opt/airflow
       NNUNET_CHECKPOINT_PATH: /opt/airflow/models/checkpoint_best.pth
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./app:/opt/airflow/app
       - ./models:/opt/airflow/models
     networks: [cdt-net]
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     command: scheduler
 
   # ── CDT Solver (FEniCSx + openCARP) ──────────────
@@ -312,3 +306,27 @@ services:
       - "8001:8001"
     networks: [cdt-net]
     command: uvicorn app.solver_api:app --host 0.0.0.0 --port 8001 --reload
+
+  # openCARP officiel (image publiee par l'equipe openCARP, arm64 natif).
+  # Alternative CONTENEURISEE au binaire natif M1 utilise habituellement ;
+  # utile sur une machine sans openCARP installe, ou pour paralleliser le
+  # DoE (plusieurs conteneurs en //, en plus du binaire host).
+  #
+  # Digest EPINGLE (pas ":latest") pour reproductibilite scientifique stricte :
+  # commit openCARP 0087e4d, valide le 6 juillet 2026 (variance g_mult confirmee,
+  # cf. CDT_JOURNAL_TECHNIQUE.md). Le binaire natif validation initiale est au
+  # tag a86f7c4 ; cette image est une version plus recente mais physiquement
+  # coherente (memes equations monodomaine/tenTusscherPanfilov).
+  #
+  # Usage : docker compose run --rm opencarp openCARP +F /data/sim.par --param-fallback=legacy
+  # (le flag --param-fallback=legacy est REQUIS avec cette version du parser)
+  #
+  # profiles=["tools"] : jamais lance par un simple "docker compose up" (pas
+  # un service persistant, juste un outil de calcul a la demande).
+  opencarp:
+    image: docker.opencarp.org/opencarp/opencarp@sha256:206c525e8b53caa67132a413c4b95cd005085c1578fd6f5ca8cc2f442a179204
+    container_name: cdt-opencarp
+    profiles: ["tools"]
+    volumes:
+      - ./data/opencarp:/data
+    networks: [cdt-net]
