@@ -99,12 +99,15 @@ class FenicsxSolver:
     def _run_fenicsx(self, params, nodes, elements, fibers,
                       T_act_kPa, twin_id, job_id):
         import dolfinx
+        import dolfinx.log
+        dolfinx.log.set_log_level(dolfinx.log.LogLevel.INFO)
         import dolfinx.fem
         import dolfinx.fem.petsc
         import dolfinx.nls.petsc
         import dolfinx.mesh
         import ufl
         from mpi4py import MPI
+        from petsc4py import PETSc
 
         elements_np = np.array(elements, dtype=np.int64)
         domain = ufl.Mesh(ufl.VectorElement("Lagrange", ufl.tetrahedron, 1))
@@ -126,11 +129,21 @@ class FenicsxSolver:
 
         DG = dolfinx.fem.functionspace(msh, ("DG", 0, (3,)))
         f0_func = dolfinx.fem.Function(DG)
-        for i in range(min(len(elements), len(fibers))):
-            f0_func.x.array[i*3:(i+1)*3] = fibers[i]
+        # BUG CORRIGE : DG0 attend UN vecteur PAR ELEMENT (tetraedre), mais
+        # "fibers" est indexe PAR NOEUD (convention openCARP .lon nodale).
+        # On moyenne les fibres des 4 noeuds de chaque tet pour obtenir la
+        # fibre par element, et on normalise (evite les vecteurs nuls/non-unit
+        # qui degeneraient outer(f0,f0) et la matrice tangente).
+        elements_arr = np.asarray(elements)
+        fiber_per_elem = np.zeros((len(elements_arr), 3))
+        for e_idx, tet in enumerate(elements_arr):
+            avg = fibers[tet].mean(axis=0)
+            norm = np.linalg.norm(avg)
+            fiber_per_elem[e_idx] = avg / norm if norm > 1e-8 else np.array([1.0, 0.0, 0.0])
+        f0_func.x.array[:] = fiber_per_elem.flatten()
         f0 = ufl.as_vector([f0_func[0], f0_func[1], f0_func[2]])
 
-        T_act = dolfinx.fem.Constant(msh, float(T_act_kPa * 1000.0))
+        T_act = dolfinx.fem.Constant(msh, 0.0)
 
         F_passive = ufl.derivative((W_passive + W_vol) * ufl.dx, u, v)
         F_active = T_act * ufl.inner(
@@ -150,9 +163,50 @@ class FenicsxSolver:
         solver = dolfinx.nls.petsc.NewtonSolver(MPI.COMM_WORLD, problem)
         solver.atol = 1e-6
         solver.rtol = 1e-4
-        solver.max_it = 50
+        solver.max_it = 100
+        solver.report = True
+        solver.convergence_criterion = "incremental"
+        # CRITIQUE : le pas Newton "plein" (relaxation=1.0, defaut) diverge
+        # avec cette loi de materiau exponentielle raide (b=7.2) — residu
+        # observe croissant (167 -> 598 -> inf) des la 2e iteration. Un pas
+        # Newton complet depasse la solution vers une config physiquement
+        # invalide (J<=0 quelque part). Sous-relaxation standard pour
+        # stabiliser (pratique courante en hyperelasticite non-lineaire).
+        solver.relaxation_parameter = 0.3
+        # Solveur lineaire direct : plus robuste que l'iteratif par defaut
+        # pour ce systeme quasi-incompressible (evite les echecs de
+        # preconditionnement observes avec le solveur iteratif par defaut).
+        ksp = solver.krylov_solver
+        opts = PETSc.Options()
+        prefix = ksp.getOptionsPrefix()
+        opts[f"{prefix}ksp_type"] = "preonly"
+        opts[f"{prefix}pc_type"] = "lu"
+        ksp.setFromOptions()
 
-        n_its, converged = solver.solve(u)
+        # --- Montee en charge progressive (continuation) de la tension active ---
+        # CRITIQUE : appliquer T_max d'un coup (0 -> 135kPa en un seul pas Newton)
+        # provoque un pivot nul (deformation degeneree, J<=0 quelque part) sur un
+        # maillage reel. Solution standard en mecanique non-lineaire : monter la
+        # charge par paliers, en reutilisant u convergee comme point de depart
+        # du palier suivant (warm start).
+        n_load_steps = 30
+        n_its_total = 0
+        converged = False
+        for step in range(1, n_load_steps + 1):
+            T_act.value = float(T_act_kPa * 1000.0) * (step / n_load_steps)
+            try:
+                n_its, converged = solver.solve(u)
+                n_its_total += n_its
+                logger.info("mechanics.fenicsx.load_step",
+                           step=step, n_load_steps=n_load_steps,
+                           T_act_kPa=T_act.value/1000.0, n_its=n_its,
+                           converged=converged)
+            except RuntimeError as e:
+                logger.error("mechanics.fenicsx.load_step_failed",
+                            step=step, T_act_kPa=T_act.value/1000.0, error=str(e))
+                converged = False
+                break
+        n_its = n_its_total
         u_arr = u.x.array.reshape(-1, 3)
 
         vol_tissue = self._compute_volume(nodes + u_arr, elements)

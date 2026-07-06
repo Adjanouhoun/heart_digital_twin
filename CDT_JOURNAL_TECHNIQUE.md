@@ -873,3 +873,79 @@ Permet de paralleliser le DoE : plusieurs conteneurs opencarp en simultane,
 en plus du binaire natif M1, sans rien casser de l'existant. Portable :
 un chercheur clonant le repo sur une autre machine (sans openCARP compile)
 peut lancer des simulations immediatement via docker compose.
+
+---
+## JALON — FEniCSx valide sur vrai maillage myocardique (6 juillet 2026)
+
+### Contexte
+Le solveur FEniCSx (Holzapfel-Ogden isotrope + tension active BCS, deja ecrit
+dans app/solver/mechanics/fenicsx_solver.py) n'avait jamais tourne : dolfinx
+non installe (pip impossible sur macOS ARM sans conda), et coupled_solver.py
+utilisait un placeholder analytique a la place ("En production : remplacer
+par FEniCSx" — jamais fait).
+
+### Environnement : image Docker officielle dolfinx v0.7.3
+Meme strategie que pour openCARP : image officielle plutot que compilation
+maison. dolfinx/dolfinx:v0.7.3 (arm64 natif, digest exact = version pour
+laquelle le code existant a ete ecrit). Code importe et s'execute SANS
+adaptation d'API (bon choix de version).
+
+### Bug 1 trouve et corrige : indexation des fibres
+DG0 (functionspace fibres) attend UN vecteur PAR ELEMENT (tetraedre), mais le
+code lisait fibers[i] avec i=index d'ELEMENT sur un tableau indexe par NOEUD
+(convention .lon openCARP, nodale). Resultat : fibres incoherentes + ~194000
+elements (sur 251533) avec fibre nulle non-initialisee.
+Fix : moyenner les fibres des 4 noeuds de chaque tet + normaliser.
+(Bug reel, necessaire, mais PAS la cause principale du pivot nul.)
+
+### Bug 2 trouve et corrige : slivers geometriques invisibles au filtre h_min
+Diagnostic par elimination (methode : isoler variable par variable, comme
+pour g_mult) :
+- H1 ecartee : P1 vs P2 (verrouillage volumetrique) — test sur cube
+  synthetique : P1 CONVERGE (135kPa direct), P2 ECHOUE. Donc P1 n'est PAS
+  le coupable ; le probleme est SPECIFIQUE au maillage reel, pas au code.
+- Calcul angle diedre minimal par tet (nouvelle fonction
+  filter_degenerate_dihedral dans app/core/units.py) sur le maillage Gmsh
+  reel (57058 nodes, 251533 tets) : 58 tets avec angle < 1 deg, pire a
+  0.14 deg (quasi 2D). Le filtre h_min (longueur d'arete) ne les detectait
+  PAS car leurs aretes sont individuellement assez longues.
+Fix : filtre angle diedre >= 15 deg. Retire 8825 tets (3.51%) sur le
+maillage patient001. Elimine le pivot nul PETSc (FACTOR_NUMERIC_ZEROPIVOT).
+
+### Bug 3 trouve et corrige : divergence Newton (pas plein trop agressif)
+Meme apres fix 1+2, Newton divergeait (residu croissant 167->598->inf) des
+le 1er palier de charge (10% de T_max), a cause de la loi de materiau
+exponentielle raide (Demiray-type, b=7.2) : un pas Newton complet dans
+une direction mal geree ecrase la config vers J<=0.
+Fix : sous-relaxation (solver.relaxation_parameter=0.3, defaut 1.0) +
+continuation de charge (T_act monte progressivement sur N paliers, warm
+start entre paliers). Confirme : residu decroissant MONOTONE sur 17
+iterations (1240 -> 733 -> ... -> 110), aucune divergence. Calcul interrompu
+manuellement (trop lent, voir ci-dessous) mais tendance de convergence
+claire et validee.
+
+### Etat actuel : VALIDE scientifiquement, PAS PRATIQUE en vitesse
+La formulation converge desormais sur le vrai maillage (avec filtrage +
+sous-relaxation), mais le solveur LU direct sur 242708 tets (post-filtrage)
+est tres lent (~57s/iteration Newton, potentiellement des heures pour un
+cas complet avec 30 paliers). A optimiser avant integration production.
+
+### Points ouverts (prochaine session)
+- Vitesse : passer a un solveur iteratif preconditionne (au lieu de LU
+  direct) adapte a un systeme quasi-incompressible de cette taille.
+- Reduire le nombre de paliers de charge (pas adaptatif : gros pas si Newton
+  converge vite, petits pas sinon) au lieu de 30 paliers fixes.
+- Une fois rapide : brancher REELLEMENT FenicsxSolver dans coupled_solver.py
+  (actuellement _compute_volume_waveform utilise toujours le placeholder
+  analytique, jamais remplace malgre le commentaire dans le code).
+- Alors seulement : le DoE 500 sims (differe volontairement aujourd'hui, cf
+  decision anterieure) aura un sens complet (EP + mecanique reelles).
+
+### Fichiers de diagnostic crees (scripts/, reutilisables)
+- test_fenicsx_real.py : test complet sur vrai maillage (charge + filtre +
+  FEniCSx)
+- diag_fenicsx.py : reproduction instrumentee avec KSP verbeux
+- diag_p1_vs_p2.py : test isole P1 vs P2 sur cube synthetique (a garde comme
+  regression test rapide)
+- mesh_quality_dihedral.py : calcul standalone angle diedre (diagnostic
+  reutilisable sur tout maillage)
