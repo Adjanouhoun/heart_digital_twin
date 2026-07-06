@@ -142,18 +142,31 @@ class OpenCARPSolver:
         self._write_mesh_files_um(work_dir, nodes_um, elements_kept, fibers_kept)
 
         # Apex = point le plus bas en Z (um), stimulus sphere locale 3mm
+        # Apex = le VRAI noeud le plus bas du myocarde (pas un point dans le vide).
+        # Bug precedent : nodes_um[:,2].min() - 100 placait le stimulus SOUS le
+        # maillage -> seulement ~19 noeuds de bord actives -> propagation degeneree
+        # insensible a g_il. On prend les coordonnees d'un noeud reel du tissu.
+        apex_idx = int(np.argmin(nodes_um[:, 2]))
         apex_um = (
-            float(nodes_um[:, 0].mean()),
-            float(nodes_um[:, 1].mean()),
-            float(nodes_um[:, 2].min() - 100),
+            float(nodes_um[apex_idx, 0]),
+            float(nodes_um[apex_idx, 1]),
+            float(nodes_um[apex_idx, 2]),
         )
+        # Conductivites : DECOUVERTE CRITIQUE (6 juillet) - gregion[0].g_il/g_it
+        # seuls sont IGNORES par openCARP (verifie par comparaison MD5 binaire
+        # de vm.igb : identique pour g_il variant d'un facteur 40). Le vrai
+        # levier est gregion[0].g_mult (confirme : md5 differe des que g_mult
+        # change). On garde g_il/g_it aux valeurs validees et on exprime la
+        # variation du DoE (sigma_l) comme un multiplicateur autour de 1.0.
+        g_mult = params.sigma_l / 0.30  # 0.30 = valeur de reference validee
         par_content = generate_par_file(
             mesh_path=str(work_dir / "mesh"),
             output_path=str(work_dir / "output"),
             tend_ms=params.duration_ms,
             apex_um=apex_um,
-            stim_radius_um=3000.0,
+            stim_radius_um=5000.0,
             bcl_ms=min(params.bcl_ms, params.duration_ms),
+            g_mult=g_mult,
         )
         par_file = work_dir / "sim.par"
         par_file.write_text(par_content)
@@ -225,23 +238,42 @@ class OpenCARPSolver:
 
     def _parse_opencarp_output(self, work_dir, twin_id, job_id, nodes):
         N = len(nodes)
-        lat_file = work_dir / "output" / "lats_thresh.dat"
+        # openCARP nomme le fichier d'activation : init_acts_<ID>-thresh.dat
+        # (ID=depol -> init_acts_depol-thresh.dat).
+        lat_file = work_dir / "output" / "init_acts_depol-thresh.dat"
+        activation_times = np.zeros(N, dtype=np.float32)
         if lat_file.exists():
-            activation_times = np.fromfile(str(lat_file), dtype=np.float32)
+            try:
+                raw = np.loadtxt(str(lat_file))
+                activation_times = np.asarray(raw, dtype=np.float32).ravel()[:N]
+            except Exception as e:
+                logger.warning("ep.lat_parse_failed", error=str(e))
         else:
-            activation_times = np.zeros(N, dtype=np.float32)
+            logger.warning("ep.lat_file_missing", file=str(lat_file),
+                           msg="depol.dat absent — CV non mesuree")
 
         valid = activation_times > 0
-        if valid.sum() > 10:
-            max_dist = np.max(np.linalg.norm(nodes[valid] - nodes[valid].mean(axis=0), axis=1))
-            max_time = activation_times[valid].max() - activation_times[valid].min()
-            cv = (max_dist / max_time) if max_time > 0 else 0.5
+        # Le fichier LAT peut avoir une taille != du maillage (openCARP ecrit
+        # sur son propre indexage). On aligne noeuds et temps au meme minimum.
+        M = min(len(activation_times), len(nodes))
+        at = activation_times[:M]
+        nd = nodes[:M]
+        v = at > 0
+        if v.sum() > 10:
+            max_dist = np.max(np.linalg.norm(nd[v] - nd[v].mean(axis=0), axis=1))
+            max_time = at[v].max() - at[v].min()
+            cv = (max_dist / max_time) if max_time > 0 else 0.0
         else:
-            cv = 0.5
+            cv = 0.0  # non mesuree (pas de fallback trompeur a 0.5)
+
+        # Normaliser a N elements pour coherence de l'EPResult (le fichier LAT
+        # peut differer du nb de noeuds). Padding avec -1 (= non active).
+        act_norm = np.full(N, -1.0, dtype=np.float32)
+        act_norm[:M] = activation_times[:M]
 
         return EPResult(
             twin_id=twin_id, job_id=job_id,
-            activation_times_ms=activation_times,
+            activation_times_ms=act_norm,
             vm_peak_mv=np.full(N, 30.0),
             conduction_velocity_ms=cv,
             apd90_ms=280.0,

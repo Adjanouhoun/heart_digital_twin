@@ -58,6 +58,9 @@ def generate_par_file(
     apex_um: tuple,
     stim_radius_um: float = 5000.0,
     bcl_ms: float = None,
+    g_il: float = None,
+    g_it: float = None,
+    g_mult: float = 1.0,
 ) -> str:
     """Genere un fichier .par openCARP (syntaxe a86f7c4) avec parametres valides.
 
@@ -68,8 +71,12 @@ def generate_par_file(
         apex_um: coordonnees de l'apex en um (x, y, z) — centre du stimulus
         stim_radius_um: rayon de la sphere de stimulation en um
         bcl_ms: basic cycle length (doit etre <= tend_ms)
+        g_il, g_it: conductivites intracellulaires. Si None -> valeurs VALIDATED.
+            Passees par le DoE pour que la CV VARIE avec les parametres.
     """
     c = VALIDATED
+    gil = g_il if g_il is not None else c.g_il
+    git = g_it if g_it is not None else c.g_it
 
     if bcl_ms is None:
         bcl_ms = tend_ms
@@ -94,6 +101,15 @@ timedt = {timedt}
 bidomain = {c.bidomain}
 parab_solve = {c.parab_solve}
 
+# --- Region physique (CRITIQUE) : rattache le domaine electrique au tag 1 ---
+# Sans ce bloc, openCARP affiche "No physics region defined" et IGNORE les
+# gregion (conductivites) -> g_il sans effet -> CV constante. ptype=0 = electrique.
+num_phys_regions = 1
+phys_region[0].name = Intracellular domain
+phys_region[0].ptype = 0
+phys_region[0].num_IDs = 1
+phys_region[0].ID = 1
+
 # --- Modele ionique ---
 num_imp_regions = 1
 imp_region[0].im = {c.ionic_model}
@@ -104,10 +120,11 @@ imp_region[0].ID = 1
 num_gregions = 1
 gregion[0].num_IDs = 1
 gregion[0].ID = 1
-gregion[0].g_il = {c.g_il}
-gregion[0].g_it = {c.g_it}
+gregion[0].g_il = {gil}
+gregion[0].g_it = {git}
 gregion[0].g_el = {c.g_el}
 gregion[0].g_et = {c.g_et}
+gregion[0].g_mult = {g_mult}
 
 # --- Stimulus (sphere a l'apex, coordonnees en um) ---
 num_stim = 1
@@ -123,4 +140,14 @@ stim[0].elec.p0[0] = {ax:.0f}
 stim[0].elec.p0[1] = {ay:.0f}
 stim[0].elec.p0[2] = {az:.0f}
 stim[0].elec.radius = {stim_radius_um:.0f}
+
+# --- Detection des temps d'activation (LAT) : requis pour mesurer la CV ---
+# Sans ce bloc, openCARP ne produit pas depol.dat et la CV retombe sur une
+# valeur codee en dur (0.5). measurand=0 (Vm), threshold=-75mV (front montant).
+num_LATs = 1
+lats[0].all = 0
+lats[0].method = 1
+lats[0].measurand = 0
+lats[0].threshold = -75
+lats[0].ID = depol
 """
