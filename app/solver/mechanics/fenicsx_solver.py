@@ -179,8 +179,10 @@ class FenicsxSolver:
         ksp = solver.krylov_solver
         opts = PETSc.Options()
         prefix = ksp.getOptionsPrefix()
-        opts[f"{prefix}ksp_type"] = "preonly"
-        opts[f"{prefix}pc_type"] = "lu"
+        opts[f"{prefix}ksp_type"] = "gmres"
+        opts[f"{prefix}pc_type"] = "gamg"
+        opts[f"{prefix}ksp_rtol"] = 1e-8
+        opts[f"{prefix}ksp_max_it"] = 300
         ksp.setFromOptions()
 
         # --- Montee en charge progressive (continuation) de la tension active ---

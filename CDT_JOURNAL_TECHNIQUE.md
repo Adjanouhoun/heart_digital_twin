@@ -949,3 +949,34 @@ cas complet avec 30 paliers). A optimiser avant integration production.
   regression test rapide)
 - mesh_quality_dihedral.py : calcul standalone angle diedre (diagnostic
   reutilisable sur tout maillage)
+
+---
+## JALON — FEniCSx accelere via GAMG (6 juillet 2026, suite)
+
+### Optimisation vitesse
+Solveur lineaire LU direct -> GAMG (multigrille algebrique) + GMRES.
+- LU direct : ~57s/iteration Newton (vrai maillage, 242708 tets post-filtrage)
+- GAMG      : ~8.4s/iteration Newton
+=> Acceleration ~6.8x confirmee sur le vrai maillage myocardique.
+
+Test isole sur cube synthetique (diag_p1_vs_p2.py) : sur petit systeme
+(4x4x4, peu de DDL), GAMG et LU sont equivalents (l'overhead de construction
+de la hierarchie AMG annule le gain). L'avantage GAMG n'apparait que sur
+les gros systemes (171K+ DDL) — cohere avec la theorie, confirme sur le cas
+reel.
+
+Note secondaire : maillage synthetique 8x8x8 (denser) casse la convergence
+Newton en pas complet la ou 4x4x4 marche — la densite du maillage seule
+affecte la robustesse de convergence, coherent avec les slivers geometriques
+deja identifies sur le vrai maillage.
+
+### Run complet en cours (arriere-plan)
+Lance via nohup + docker run (PID host 50555), log dans
+~/cdt/fenicsx_full_run.log. Premier palier de charge (13.5kPa) CONVERGE
+a l'iteration 32 (residu 0.000073 < tol 0.0001) en ~4.5min. 30 paliers prevus
+au total -> estimation ~2h+ pour la simulation complete (T_max=135kPa).
+
+### Prochaine etape
+Une fois le run termine : verifier les deplacements finaux (endo/epi
+radial, physiologiquement coherents), puis brancher reellement FenicsxSolver
+dans coupled_solver.py (actuellement encore sur le placeholder analytique).
