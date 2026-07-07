@@ -1103,3 +1103,42 @@ P15 : cause racine RÉSOLUE (formulation), implémentation praticable NON abouti
 **Reste :** formulation mixte P2-P1 écrite et compilée, mais 1er solve >14 min (impraticable). Voir pistes reprise dans l'entrée de session 2026-07-07.
 **Statut :** cause racine RÉSOLUE, implémentation praticable OUVERTE.
 
+
+---
+
+## Session 2026-07-07 (soir) — P15 : diagnostic mixte P2-P1 approfondi, blocage isolé au line search
+
+**Point de départ :** le mixte P2-P1 (v4) compilait mais le 1er solve tournait >14 min sans palier. Objectif de la session : trancher entre SNES qui boucle / MUMPS qui bloque / coût par itération, via un script isolé (scripts/diag_snes_monitor.py) faisant UN seul solve à 2% de charge avec snes_monitor + ksp_monitor + horodatage par ligne.
+
+### Faits établis (chaîne de causes complète)
+
+1. **MUMPS résout parfaitement.** Sur maillage réduit (34025 tets, 209864 DOFs), le KSP direct LU/MUMPS résout en UNE itération : résidu 2.08e6 -> 1.5e-8. La brique linéaire est saine. (Le blocage initialement attribué à MUMPS était un artefact de timeout trop court.)
+
+2. **Les options MUMPS "point-selle" étaient nuisibles.** icntl_24=1 + cntl_1=1e-6 + icntl_14=200 ont CASSÉ la factorisation (blocage total). Retirées. La config MUMPS par défaut est la bonne.
+
+3. **Coût par cycle assemblage+factorisation ≈ 52 s** sur 34K tets (mesuré par horodatage : solve démarre, 1er résidu affiché 52 s après). Lourd mais pas rédhibitoire pour UN run patient (~3-4 h sur maillage complet).
+
+4. **Cause racine du blocage : NaN sur inversion transitoire + line search qui boucle.**
+   - Avec line search 'basic' (Newton nu) : reason=-4 (SNES_DIVERGED_FNORM_NAN), 0 itération. Le pas de Newton complet, même à 2% de charge, retourne un élément (J<=0) -> J^(-2/3) = NaN dans l'invariant isochore.
+   - Avec line search 'bt' : boucle indéfiniment (jamais d'itération 1, timeout). Il tente d'amortir le pas pour éviter le NaN mais chaque évaluation ré-assemble (52 s) et il n'aboutit pas.
+   - Régularisation J_reg = max(J, 1e-3) + minlambda=1e-3 : n'a PAS débloqué le 'bt' (toujours bloqué au 1er solve).
+
+### Diagnostic
+La formulation mixte P2-P1 est correcte (locking P1 résolu), MUMPS est sain, mais le PREMIER pas de Newton à faible charge produit une inversion d'élément transitoire que ni la régularisation de J ni le line search bt (avec minlambda) ne gèrent proprement. Le blocage n'est PAS le coût de calcul — c'est le line search qui ne converge pas sur ce premier incrément.
+
+### Pistes pour la reprise (par ordre de promesse)
+1. **Continuation en charge BEAUCOUP plus fine dès le départ** : commencer à 0.1% voire 0.01% de T_max (pas 2%), pour que le 1er incrément de déplacement ne retourne aucun élément. Le vrai fenicsx_solver.py a la continuation adaptative — la tester avec dlam initial très petit (ex. 1e-3) plutôt que 1/30.
+2. **Régularisation plus robuste de l'énergie** : au lieu de max(J,1e-3), utiliser une formulation qui pénalise fortement J->0 en amont (barrière), ou passer à un solveur SNES de type 'newtontr' (trust region) qui gère mieux les pas menant à des états non-physiques que le line search.
+3. **snes_linesearch_type 'l2' ou 'cp'** non testés sur le mixte (seulement bt et basic).
+4. **Vérifier le scaling** du résidu mixte (u ~mm vs p ~1e5 Pa) — un mauvais conditionnement relatif peut donner une direction de Newton dominée par la pression, d'où le pas violent sur u.
+5. Objectif = 1 run patient validé (pas la vitesse) -> on peut se permettre une continuation très fine et lente.
+
+### Statut
+P15 : formulation RÉSOLUE, solveur mixte P2-P1 correct, MUMPS sain. Blocage résiduel = convergence du 1er pas de Newton (line search / inversion transitoire). D2.1 mécanique reste OUVERT mais le périmètre du problème est maintenant réduit à un point précis.
+
+
+### 🟡 P15 (MAJ 2026-07-07 soir) — Mixte P2-P1 : blocage réduit au 1er pas de Newton
+**Établi ce soir :** MUMPS résout en 1 itération (2e6->1.5e-8, brique linéaire saine) ; coût ~52s/cycle sur 34K tets ; cause du blocage = NaN par inversion transitoire (J^(-2/3) sur J<=0) au 1er pas de Newton, que le line search bt ne parvient pas à amortir (boucle) et que basic ne gère pas (reason=-4).
+**Non résolu par :** J_reg=max(J,1e-3), minlambda=1e-3.
+**Reprise :** continuation initiale ultra-fine (dlam 1e-3), ou trust-region (newtontr), ou line search l2/cp, ou vérif scaling u/p. Objectif = 1 run validé, vitesse secondaire.
+**Statut :** formulation + solveur corrects, convergence 1er incrément OUVERTE.
