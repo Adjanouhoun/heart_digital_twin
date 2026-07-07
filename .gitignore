@@ -20,3 +20,5 @@ dist/
 reports/
 docker/opencarp/
 models/
+*_run.log
+fenicsx_*.log
