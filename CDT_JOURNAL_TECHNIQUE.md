@@ -980,3 +980,74 @@ au total -> estimation ~2h+ pour la simulation complete (T_max=135kPa).
 Une fois le run termine : verifier les deplacements finaux (endo/epi
 radial, physiologiquement coherents), puis brancher reellement FenicsxSolver
 dans coupled_solver.py (actuellement encore sur le placeholder analytique).
+
+---
+## CORRECTIF METHODOLOGIQUE — Mise en veille Mac invalide les calculs longs
+
+### Probleme decouvert
+Le premier run complet FEniCSx (30 paliers, lance en arriere-plan sans
+caffeinate) a "termine" avec converged=True mais un resultat NON PHYSIQUE :
+endo_radial_disp_mm=11514 (11.5 METRES, impossible), volume_tissue_mL=5e15.
+
+### Cause identifiee
+Le Mac est parti en veille pendant le calcul. Log revele : paliers 1-26
+convergent normalement (residus reels decroissants, dizaines d'iterations),
+paliers 27-30 montrent r(abs)=0, r(rel)=nan, converged en seulement 2
+iterations — signature d'un calcul perturbe/corrompu par la mise en veille,
+PAS d'un vrai probleme de divergence de la formulation.
+
+### Fix : caffeinate
+Toute execution longue (docker run en arriere-plan) doit desormais etre
+lancee avec caffeinate -i pour empecher la mise en veille systeme :
+  caffeinate -i nohup docker run ... &
+A appliquer systematiquement pour le futur DoE (500 sims, ~28h) et tout
+calcul FEniCSx long.
+
+### Statut
+Run relance avec caffeinate -i (PID 80231) pour validation propre du
+resultat final (deplacements endo/epi physiologiques attendus).
+
+---
+
+## Session 2026-07-06 — FEniCSx mécanique : fix indexation DOF validé, divergence physique haute charge identifiée
+
+**Contexte :** poursuite du déverminage du solveur mécanique FEniCSx (dolfinx 0.7.3) sur maillage patient réel. Objectif : obtenir un `endo_radial_disp_mm` physiologiquement plausible (quelques mm) au lieu de la valeur aberrante 11514 du run précédent.
+
+### Résultat du run complet (sans timeout)
+
+| Métrique | Valeur | Verdict |
+|----------|--------|---------|
+| Durée | 2277.2 s (~38 min) | Attendu |
+| converged | True | Trompeur (voir P15) |
+| n_iterations | 333 | — |
+| endo_radial_disp_mm | 24590.554 | ABSURDE (~24.6 m) |
+| epi_radial_disp_mm | 14122.186 | ABSURDE |
+| volume_tissue_mL | 1.93e13 | ABSURDE |
+| solver_version | fenicsx-0.7.3 | — |
+
+### Enseignement : deux problèmes superposés, dont un seul est résolu
+
+Le fix d'indexation DOF (remap coordonnée-based via `tabulate_dof_coordinates()`) **a un effet réel** : la valeur est passée de 11514 à 24590. Ce n'était donc pas une coïncidence de post-traitement. Mais un **second problème, physique et distinct**, subsiste et domine le résultat — voir P15.
+
+### État des correctifs mécaniques en place (cette session et avant)
+
+- Champ de fibres sur espace DG0 (par élément, pas par nœud)
+- `filter_degenerate_dihedral()` dans `app/core/units.py` (58 tets à angle dièdre < 15° au repos)
+- Continuation par 30 paliers de charge + `relaxation_parameter=0.3`
+- Préconditionneur GAMG en remplacement de LU (~6.8× plus rapide)
+- Remap DOF coordonnée-based en post-traitement
+
+### Décision
+
+Fix indexation validé et conservé. Le problème physique haute charge (P15) est localisé mais **non résolu** : c'est un chantier de robustesse numérique à reprendre à froid, pas un fix de fin de session. La mécanique FEniCSx n'est donc **pas encore validée en propre** — à ne pas cocher dans D2.1 tant que P15 n'est pas levé.
+
+
+### 🔴 P15 — FEniCSx : convergence factice et divergence physique à haute charge
+**Symptôme :** run complet `converged=True` mais `endo_radial_disp_mm=24590` (~24.6 m), `volume_tissue_mL=1.93e13`. À partir du palier 25 (T_act=112.5 kPa, ~83% de la charge max de 135 kPa), chaque palier converge en seulement `n_its=2` — beaucoup trop rapide pour une vraie convergence à cette charge.
+**Cause :** au-delà de ~108-112 kPa, le maillage franchit un état où des éléments se dégénèrent sous déformation (Jacobien qui s'annule ou s'inverse — des tets limites au repos, 15-20° d'angle dièdre, s'écrasent à 0° sous forte charge). Le critère Newton `r(rel) < tol` est trompé par un résidu qui devient numériquement 0/0, d'où une convergence factice et une solution non physique.
+**Distinction :** indépendant du bug d'indexation DOF (déjà corrigé). Les paliers uniformes (~4.5 kPa, ~3.3% de la charge max) ne subdivisent pas la zone à risque.
+**Piste de résolution (non implémentée) :**
+- Paliers adaptatifs au-delà de 80% de charge (subdiviser au lieu d'incréments uniformes)
+- Contrôle du Jacobien *pendant* la simulation : refuser le pas si un élément passe sous un seuil (J ≤ ε), au lieu de laisser Newton converger faussement
+**Statut :** OUVERT — bloquant D2.1 mécanique.
+
