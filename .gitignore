@@ -22,3 +22,5 @@ docker/opencarp/
 models/
 *_run.log
 fenicsx_*.log
+*_run.log
+fenicsx_*.log
