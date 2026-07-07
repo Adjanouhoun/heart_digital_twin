@@ -1051,3 +1051,55 @@ Fix indexation validé et conservé. Le problème physique haute charge (P15) es
 - Contrôle du Jacobien *pendant* la simulation : refuser le pas si un élément passe sous un seuil (J ≤ ε), au lieu de laisser Newton converger faussement
 **Statut :** OUVERT — bloquant D2.1 mécanique.
 
+
+---
+
+## Session 2026-07-07 — P15 : descente diagnostique complète, formulation quasi-incompressible identifiée
+
+**Contexte :** reprise de P15 (résultat mécanique absurde, endo_disp=24590 mm, volume ×1e11). Analyse du code + recherche littérature cardiaque (Nolan 2014, Usyk 2002, fenicsx-pulse/Finsberg, Ambit/Hirschvogel).
+
+### Cause racine identifiée : formulation NON quasi-incompressible
+
+Le fichier v1 avait trois défauts de formulation, tous corrigés :
+- Terme exponentiel Holzapfel sur `tr(C)` (non isochore) → l'exponentielle voyait le gonflement volumétrique et explosait. Corrigé en `I1_bar = J^(-2/3) tr(C)`.
+- `kappa_vol = 1e4 Pa` (10 kPa), ~13× trop faible face à T_max=135 kPa. Porté à 1e6.
+- `(J-1)^2` ne pénalise pas l'inversion. Remplacé par `(ln J)^2` (diverge en J→0+).
+
+### Descente diagnostique (chaque étape élimine une hypothèse)
+
+| Version | Changement | Résultat | Diagnostic |
+|---------|-----------|----------|------------|
+| v1 | tr(C) + kappa=1e4 + NewtonSolver relax fixe | volume ×1e11, fausse conv. | formulation cassée |
+| v2 | isochore + kappa=1e6 + SNES/bt + GAMG | min_J=1.0 mais reason=-3 | GAMG diverge (pénalité mal conditionnée) |
+| v3 | KSP direct LU/MUMPS | min_J repasse >0 à ~0.4% charge, puis reason=-6 | maillage SAIN au repos ; line search bt échoue |
+| v3b | line search l2 | min_J=-36 (pire que bt) | ni bt ni l2 → LOCKING VOLUMÉTRIQUE P1 confirmé |
+| v4 | formulation MIXTE P2-P1 (Taylor-Hood) | compile OK, 1er solve >14 min sans palier | formulation correcte mais IMPRATICABLE sur cette config |
+
+### Acquis solides
+- La cause racine est la **quasi-incompressibilité**, pas le maillage ni le solveur. Confirmé : min_J repasse positif à faible charge (v3) → aucun sliver bloquant au repos.
+- Le **locking volumétrique du P1** est prouvé (v3b : aucun line search ne trouve de direction admissible).
+- La formulation **mixte P2-P1** est le remède théorique correct (standard cardiaque : fenicsx-pulse, Ambit).
+
+### Blocage restant (à reprendre à froid)
+Le mixte P2-P1 sur 242708 tets **compile** (FFCx OK, .so générés) mais le 1er `snes.solve()` tourne >14 min mono-thread sans rendre de palier (MEM plate à 3.1 Go → pas la factorisation seule ; probable itération SNES non convergente). Impraticable en l'état, a fortiori pour le DoE 500 sims.
+
+### Pistes pour la reprise (par ordre)
+1. Activer `snes_monitor` + `ksp_monitor` sur UN seul solve à faible charge pour voir si le SNES itère sans converger ou si MUMPS est juste lent.
+2. Alléger le maillage : target_mm plus grossier (2.0-2.5 au lieu de 1.5) → moins de DOF P2.
+3. Paralléliser : `mpirun -n 4` dans le conteneur + augmenter la RAM Docker Desktop (actuellement plafonnée à 7.75 Go, pas 32).
+4. Vérifier l'échelle de pression / le scaling du résidu mixte (deux échelles : u~mm, p~1e5 Pa) — un mauvais scaling peut empêcher la convergence SNES.
+
+### Infra notée
+- RAM Docker Desktop = 7.75 Go (pas les 32 Go de la machine). À augmenter pour la mécanique.
+- Filtre dièdre 15° retire 8825/251533 tets (3.5%) — bien plus que les 58 estimés ; maillage source à assainir en amont.
+
+### Statut
+P15 : cause racine RÉSOLUE (formulation), implémentation praticable NON aboutie. D2.1 mécanique reste OUVERT.
+
+
+### 🟡 P15 (MAJ 2026-07-07) — Quasi-incompressibilité : cause résolue, implémentation mixte à finaliser
+**Évolution :** le diagnostic « dégénérescence maillage » (initial) était faux. Cause réelle = formulation non quasi-incompressible (exp sur tr(C) non isochore + kappa trop faible), aggravée par le locking volumétrique du P1. Maillage et solveur sains.
+**Corrigé :** décomposition isochore `I1_bar=J^(-2/3)tr(C)`, `W_vol=(kappa/2)(ln J)^2`, kappa=1e6, SNES/bt, KSP direct LU/MUMPS. Volume désormais tenu (min_J=1.0).
+**Reste :** formulation mixte P2-P1 écrite et compilée, mais 1er solve >14 min (impraticable). Voir pistes reprise dans l'entrée de session 2026-07-07.
+**Statut :** cause racine RÉSOLUE, implémentation praticable OUVERTE.
+
