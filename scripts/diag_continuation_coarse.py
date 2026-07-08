@@ -1,50 +1,33 @@
 """
-Test de continuation COMPLETE, mixte P2-P1, formulation p DIRECTE (Pa).
-Version avec CHECKPOINT disque : sauvegarde apres chaque palier accepte,
-reprise automatique si un checkpoint existe deja (evite de reperdre la
-progression en cas d'interruption).
-Correctifs actifs :
-  1. SNESSetFunctionDomainError (garde-fou J avant assemblage complet)
-  2. p DIRECT (Pa) -- pas de p_hat, bug de derivation en chaine corrige
-  3. Continuation ultra-fine (dlam initial 1e-4) + restauration immediate
+Test de continuation COMPLETE sur maillage GROSSIER (patient001_coarse5,
+~5686 tets au lieu de 34025), meme formulation validee : mixte P2-P1,
+p DIRECT (Pa), garde-fou SNESSetFunctionDomainError, continuation
+ultra-fine avec checkpoint disque.
+Objectif : verifier si le temps par palier chute significativement
+(le cout d'assemblage FFCx scale ~lineairement avec le nb de cellules),
+et si possible ATTEINDRE lam=1.0 (charge complete, 135kPa) cette fois.
 """
 import sys, time, os
 sys.path.insert(0, "/cdt")
 import numpy as np
 
-from app.core.units import filter_small_elements, filter_degenerate_dihedral
-
 MESH_DIR = "/cdt/reports/meshes_acdc/meshes"
-PATIENT = "patient001"
-CHECKPOINT_PATH = "/cdt/continuation_checkpoint.npz"
+PATIENT = "patient001_coarse5"
+CHECKPOINT_PATH = "/cdt/continuation_coarse_checkpoint.npz"
 
-print("=== Chargement maillage ===", flush=True)
+print("=== Chargement maillage GROSSIER (pas de filtrage supplementaire) ===", flush=True)
 with open(f"{MESH_DIR}/{PATIENT}.pts") as f:
-    f.readline()
-    nodes_mm = np.array([list(map(float, l.split())) for l in f])
+    n = int(f.readline())
+    nodes = np.array([list(map(float, f.readline().split())) for _ in range(n)])
 with open(f"{MESH_DIR}/{PATIENT}.elem") as f:
-    f.readline()
-    elements = [[int(x) for x in l.split()[1:5]] for l in f]
+    n_elem = int(f.readline())
+    elements_final = np.array([
+        list(map(int, f.readline().split()[1:5])) for _ in range(n_elem)
+    ], dtype=np.int64)
 with open(f"{MESH_DIR}/{PATIENT}_fibers.lon") as f:
-    f.readline()
-    fibers_raw = [l.strip().split() for l in f]
+    n_fib = int(f.readline())
+    fibers = np.array([list(map(float, f.readline().split())) for _ in range(n_fib)])
 
-elements_f, _ = filter_small_elements(nodes_mm, elements, 0.3)
-keep = sorted(set(v for e in elements_f for v in e))
-node_map = {old: new for new, old in enumerate(keep)}
-nodes = nodes_mm[keep]
-elements_final = np.array([[node_map[v] for v in e] for e in elements_f], dtype=np.int64)
-fibers = np.array([
-    list(map(float, fibers_raw[i][:3])) if i < len(fibers_raw) else [1.0, 0.0, 0.0]
-    for i in keep
-])
-elements_final, _, _ = filter_degenerate_dihedral(nodes, elements_final, min_angle_deg=15.0)
-elements_final = np.array(elements_final, dtype=np.int64)
-keep2 = sorted(set(v for e in elements_final for v in e))
-node_map2 = {old: new for new, old in enumerate(keep2)}
-nodes = nodes[keep2]
-elements_final = np.array([[node_map2[v] for v in e] for e in elements_final], dtype=np.int64)
-fibers = fibers[keep2]
 print(f"Maillage: {len(nodes)} nodes, {len(elements_final)} tets", flush=True)
 
 import dolfinx
@@ -173,14 +156,13 @@ opts["pc_type"] = "lu"
 opts["pc_factor_mat_solver_type"] = "mumps"
 snes.setFromOptions()
 
-# --- CHECKPOINT : reprise si un fichier existe deja ---
 T_target_Pa = 135.0 * 1000.0
 lam = 0.0
 dlam = 1.0e-4
 DLAM_MIN = 1.0e-6
 DLAM_MAX = 0.05
 J_MIN = 0.1
-MAX_STEPS = 300
+MAX_STEPS = 500
 n_steps_prev = 0
 
 if os.path.exists(CHECKPOINT_PATH):
@@ -202,7 +184,7 @@ min_J_global = 1.0
 consecutive_easy = 0
 t_start = time.time()
 
-print(f"\n=== CONTINUATION COMPLETE p-direct (T_max=135kPa) ===", flush=True)
+print(f"\n=== CONTINUATION MAILLAGE GROSSIER p-direct (T_max=135kPa) ===", flush=True)
 
 while lam < 1.0 - 1e-9 and n_steps < MAX_STEPS:
     n_steps += 1
@@ -249,9 +231,6 @@ while lam < 1.0 - 1e-9 and n_steps < MAX_STEPS:
         if consecutive_easy >= 2:
             dlam = min(dlam * 1.5, DLAM_MAX)
 
-        # CHECKPOINT apres chaque palier accepte (ecriture atomique via
-        # fichier temporaire puis rename, evite un checkpoint corrompu
-        # si le process est tue en plein milieu de l'ecriture)
         tmp_path = CHECKPOINT_PATH + ".tmp.npz"
         np.savez(tmp_path, w_array=w_accepted, lam=lam, dlam=dlam,
                  n_steps=n_steps, min_J=min_J_global)
@@ -275,42 +254,7 @@ print(f"converged: {converged}  lam_final: {lam:.6f}  n_steps_total: {n_steps}  
       f"n_its_total: {n_its_total}  domain_errors: {pde.n_domain_errors}", flush=True)
 
 if converged:
-    u_sub = w.sub(0).collapse()
-    V1 = dolfinx.fem.functionspace(msh, ("Lagrange", 1, (3,)))
-    u1 = dolfinx.fem.Function(V1)
-    u1.interpolate(u_sub)
-    u_arr_dof_order = u1.x.array.reshape(-1, 3)
-    dof_coords = V1.tabulate_dof_coordinates()
-    coord_to_dof_idx = {tuple(np.round(c, 6)): i for i, c in enumerate(dof_coords)}
-    remap = np.array([coord_to_dof_idx[tuple(np.round(n, 6))] for n in nodes])
-    u_arr = u_arr_dof_order[remap]
-
     vol = 0.0
-    nodes_def = nodes + u_arr
-    for tet in elements_final:
-        vv = nodes_def[tet]
-        mat = np.array([vv[1]-vv[0], vv[2]-vv[0], vv[3]-vv[0]])
-        vol += abs(np.linalg.det(mat)) / 6.0
-    vol_mL = vol / 1000.0
-
-    z_mid = (nodes[:, 2].min() + nodes[:, 2].max()) / 2
-    mid_mask = np.abs(nodes[:, 2] - z_mid) < 5.0
-    mid_nodes = nodes[mid_mask]
-    center_xy = mid_nodes[:, :2].mean(0)
-    radii = np.linalg.norm(mid_nodes[:, :2] - center_xy, axis=1)
-    r_med = np.median(radii)
-    endo_r, epi_r = [], []
-    for i in np.where(mid_mask)[0]:
-        rd_dir = nodes[i, :2] - center_xy
-        r = np.linalg.norm(rd_dir)
-        if r > 0.1:
-            rd_dir /= r
-            rd = np.dot(u_arr[i, :2], rd_dir)
-            (endo_r if r < r_med else epi_r).append(rd)
-    endo_disp = np.mean(endo_r) if endo_r else 0.0
-    epi_disp = np.mean(epi_r) if epi_r else 0.0
-
-    print(f"\n=== RESULTAT PHYSIOLOGIQUE ===", flush=True)
-    print(f"volume_tissue_mL : {vol_mL:.2f}", flush=True)
-    print(f"endo_radial_disp_mm : {endo_disp:.4f}", flush=True)
-    print(f"epi_radial_disp_mm  : {epi_disp:.4f}", flush=True)
+    nodes_def = nodes + w_accepted[:len(nodes)*3].reshape(-1,3) if False else nodes
+    print("\n(Post-traitement complet omis pour ce test de vitesse -- "
+          "voir script de production pour le calcul EF/volume complet)", flush=True)

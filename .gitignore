@@ -26,3 +26,4 @@ fenicsx_*.log
 fenicsx_*.log
 diag_snes*.log
 continuation_full*.log
+continuation_mpi4.log

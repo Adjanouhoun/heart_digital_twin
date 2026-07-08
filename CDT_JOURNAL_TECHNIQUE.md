@@ -1220,3 +1220,85 @@ Continuation lancée avec p_hat=p/kappa : palier 1 accepté (min_J=0.97, domain_
 4. Envisager mpirun -n 4 (8 CPU disponibles depuis ce soir, Docker Desktop reconfiguré à 8 CPU/24GB) pour accélérer l'assemblage+factorisation par palier.
 
 **Statut** : P15 formulation validée et robuste. Praticabilité du temps de calcul en continuation complète = point ouvert, à réévaluer selon résultat du run nocturne.
+
+---
+
+## Suite (meme session, 2026-07-08 soir) — Tentative MPI : defaut topologique du maillage decouvert
+
+**Objectif** : accelerer la continuation (450-2500s/palier en mono-thread) via mpirun -n 4, en exploitant les 8 CPU Docker desormais disponibles. Formulation p-directe deja validee sur >16 paliers en mono-thread (cf. entree precedente).
+
+**Blocage rencontre** : `RuntimeError: A facet is connected to more than two cells.` -- systematique sur les 4 rangs des que n_ranks > 1.
+
+**Diagnostic effectue** :
+- Verification doublons d'elements (source .elem, apres filter_small_elements, apres filter_degenerate_dihedral) : ZERO doublon a chaque etape. Pas un probleme de duplication.
+- Test isole n=1 (create_mesh seul, sans le reste du solveur) : PASSE, `n_cells locales: 34025`.
+- Meme test isole n=4 (mpirun) : ECHOUE sur les 4 rangs, meme erreur, meme jeu de donnees.
+
+**Conclusion** : le maillage (patient001, apres filtrage a 34025 tets) contient une pathologie topologique locale (probablement un ou plusieurs tetraedres quasi-degeneres/quasi-coplanaires non retenus par le filtre dihedral a 15deg) qui est TOLEREE par dolfinx en sequentiel mais fait echouer le partitionneur SCOTCH (utilise des que n_ranks>1) lors de la construction du graphe dual des facettes.
+
+**Decision** : abandon de la piste MPI pour cette session. Retour au mono-thread deja valide (formulation p-directe + garde-fou + continuation adaptative), qui reste la version de reference dans fenicsx_solver.py (committe, commit 5b4bb44).
+
+**Pistes pour la reprise (si acceleration MPI reprise plus tard)** :
+1. Ecrire un script de detection des facettes partagees par >2 cellules DIRECTEMENT sur elements_final (construire le dictionnaire facette->liste de cellules, chercher les entrees a >2), pour localiser precisement le/les tetraedre(s) coupable(s) avant tout essai MPI.
+2. Une fois localise : soit durcir le filtre de qualite (nouveau critere en plus de l'angle diedre, ex. volume/aire ratio), soit retirer manuellement l'element identifie et verifier que ca ne cree pas de trou dans le maillage.
+3. Alternative : tester un partitionneur different (ParMETIS au lieu de SCOTCH, si disponible dans l'image dolfinx) qui pourrait etre plus tolerant.
+4. Le probleme est specifique a ce maillage (patient001, filtre a 34025 tets) -- verifier s'il se reproduit sur le maillage complet (242708 tets) ou sur d'autres patients avant de generaliser le diagnostic.
+
+**Statut global P15** : formulation mecanique validee et securisee (mono-thread). Acceleration par MPI non aboutie ce soir -- nouveau defaut distinct (topologie de maillage, pas physique/solveur) a traiter separement, hors urgence puisque le mono-thread reste une base de travail valide meme si lente.
+
+### Suite (2026-07-08 soir) — Diagnostic facette pathologique : maillage disculpe
+
+Script diag_facet_topology.py execute sur elements_final (34025 tets, identique au pipeline solveur) : construction du graphe facette->cellules en pur numpy.
+
+Resultat : 79378 facettes distinctes, 22656 a 1 cellule (bord), 56722 a 2 cellules (interne), **0 facette a 3+ cellules**. Topologie du maillage parfaitement saine.
+
+**Conclusion revisee** : le RuntimeError "A facet is connected to more than two cells" observe en MPI n'est PAS du a un defaut du maillage. La trace complete montrait un TypeError PRECEDENT ("incompatible function arguments" sur create_mesh), et le RuntimeError n'apparaissait que dans la gestion de cette premiere exception -- probablement un message d'erreur secondaire/trompeur genere par un chemin de code de secours, pas par une vraie detection topologique. Piste probable : incompatibilite entre l'API create_mesh() et le partitionneur par defaut en configuration multi-rang dans dolfinx 0.7.3 (plomberie logicielle, pas geometrie).
+
+**Decision** : chantier MPI clos pour cette session -- creuser l'API de partitionnement dolfinx 0.7.3 serait incertain et chronophage. Le mono-thread (valide, en cours d'execution stable avec checkpoint) reste la base de travail de reference.
+
+---
+
+## Session 2026-07-08 (nuit) — P15 : PREMIER RUN COMPLET REUSSI (lam=1.0)
+
+**Jalon majeur** : premiere convergence complete de la mecanique FEniCSx jusqu'a la charge active maximale (T_max=135kPa), sur maillage grossier (patient001_coarse5).
+
+### Cause de la lenteur precedente identifiee et resolue
+Sur le maillage de reference (34025 tets, target_mm=1.5), le run recent progressait a ~450-2500s/palier -> des centaines d'heures pour lam=1.0 (voir entrees precedentes). Diagnostic du goulot : OPENBLAS_NUM_THREADS n'a AUCUN effet (teste 1 vs 8 threads, temps identiques a la seconde pres) -> confirme que le cout est dans l'ASSEMBLAGE FFCx (boucles C generees par cellule pour l'energie Holzapfel + jacobien), pas dans la resolution lineaire (KSP/MUMPS deja tres rapide, 1 iteration). L'assemblage scale avec le nombre de cellules -> solution : maillage plus grossier.
+
+### Remaillage grossier (patient001_coarse5)
+Masque source : reports/meshes_acdc/segmentations/patient001_seg.nii.gz, shape (216,256,10), spacing (1.5625, 1.5625, 10.0)mm. Anisotropie native forte (Z=10mm) : target_mm=2.5 n'a quasiment aucun effet (34425 tets, quasi identique au maillage 1.5mm) car le zoom scipy.ndimage.zoom sur l'axe Z reste sur-echantillonnant. target_mm=5.0 franchit enfin la barriere : 5686 tets (apres filtre slivers), min_jacobian=0.014, num_degenerate=0. Fibres : champ tangentiel simplifie (PAS LDRB, non physiologique, uniquement pour test de vitesse) genere par scripts/generate_simple_fibers.py.
+
+### Resultat du run complet (scripts/diag_continuation_coarse.py)
+| Metrique | Valeur |
+|---|---|
+| Duree totale | 2585.9s (~43 min) |
+| Paliers | 35, TOUS acceptes (0 rejet) |
+| Iterations Newton totales | 95 |
+| domain_err_total | 0 (jamais declenche) |
+| lam_final | 1.000000 (CONVERGE) |
+| min_J final | 0.5670 |
+
+Gain de vitesse mesure : palier 1 en 52.3s (contre ~823-830s sur maillage fin) = facteur ~16x. dlam croit geometriquement sans jamais rencontrer de zone de rejet (contrairement au maillage fin qui rejetait 2-3 fois autour de lam=0.0009-0.0013) -- signe que la zone de raideur locale precedente etait probablement liee a des slivers specifiques au maillage fin, absents ou differents sur ce maillage grossier.
+
+### A faire
+- Completer le post-traitement (volume, endo/epi radial displacement, EF) -- omis dans ce script de vitesse pure.
+- Regenerer des fibres LDRB physiologiques (le champ tangentiel actuel n'est PAS anatomiquement correct) avant d'utiliser ce resultat pour toute conclusion clinique.
+- Valider si ce comportement (convergence sans rejet) se maintient sur le maillage COMPLET (57K noeuds / target_mm=1.5) avec plus de temps, ou si la difference est structurelle au maillage grossier.
+- Reste a determiner : le maillage grossier est-il suffisant pour le DoE 500 sims (production), ou seulement pour la validation de la formulation (developpement) ?
+
+**Statut P15** : formulation ENTIEREMENT VALIDEE de bout en bout (lam=0 -> lam=1.0, charge physiologique complete). Premiere fois. Praticabilite confirmee sur maillage grossier ; maillage de production (1.5mm) reste a re-tester avec le temps necessaire (ou en acceptant un maillage plus grossier pour le DoE).
+
+### Post-traitement du run convergent (lam=1.0)
+
+| Metrique | Valeur | Evaluation |
+|---|---|---|
+| Deplacement min/max | -17.59 / +9.81 mm | PLAUSIBLE (vs 24.6 METRES au tout debut de P15) |
+| Volume repos -> deforme | 90.36 -> 87.22 mL (-3.47%) | Raisonnable, pas parfait |
+| endo_radial_disp_mm | -4.77 | Bon sens (contraction) |
+| epi_radial_disp_mm | -6.30 | SUSPECT : plus negatif que endo, physiologiquement attendu l'inverse |
+
+**Diagnostic de l'anomalie epi/endo** : tres probablement du au champ de fibres TANGENTIEL SIMPLIFIE (pas LDRB) utilise pour ce test de vitesse -- sans variation transmurale d'helicite (endocarde/epicarde), la tension active tire plus uniformement sur toute l'epaisseur, ce qui peut inverser le comportement relatif attendu.
+
+**Conclusion** : ce run valide la MECANIQUE (convergence stable jusqu'a charge complete, deplacements dans l'ordre de grandeur physiologique correct, volume quasi conserve) mais PAS la physiologie fine. Ne pas utiliser ces chiffres (EF, deplacements precis) pour une conclusion clinique -- refaire avec de vraies fibres LDRB avant toute exploitation scientifique du resultat.
+
+**Prochaine etape** : generer des fibres LDRB physiologiques sur le maillage grossier (ou reutiliser LDRB existant si transferable), relancer la continuation avec fibres correctes pour un resultat exploitable.
