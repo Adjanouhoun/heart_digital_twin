@@ -1142,3 +1142,81 @@ P15 : formulation RÉSOLUE, solveur mixte P2-P1 correct, MUMPS sain. Blocage ré
 **Non résolu par :** J_reg=max(J,1e-3), minlambda=1e-3.
 **Reprise :** continuation initiale ultra-fine (dlam 1e-3), ou trust-region (newtontr), ou line search l2/cp, ou vérif scaling u/p. Objectif = 1 run validé, vitesse secondaire.
 **Statut :** formulation + solveur corrects, convergence 1er incrément OUVERTE.
+
+---
+
+## Session 2026-07-07 (nuit) — P15 : stratégie de correction validée contre doc PETSc officielle
+
+**Contexte :** poursuite du diagnostic mixte P2-P1. Recherche ciblée dans la doc PETSc/dolfinx officielle (manuel SNES, SNESLINESEARCHBT, SNESSetFunctionDomainError, fenicsx-pulse) pour fonder la correction sur des faits vérifiés plutôt que du tâtonnement.
+
+### Nouveau diagnostic du blocage `bt` (14 min)
+
+Le code source PETSc (`linesearchbt.c`) confirme : le backtracking `bt` ne s'arrête pas à la 1ère tentative — il refit un polynôme et retente jusqu'à `snes_linesearch_max_it` fois ou `minlambda`. Chaque tentative réassemble intégralement (52 s). Si le pas complet retourne un élément, 15-25 halvings géométriques = 13-22 min. **Ce n'était probablement pas un blocage infini, mais un backtracking fonctionnel mais ruineusement coûteux**, car chaque essai de λ refait tout l'assemblage au lieu de vérifier `J` en amont, à moindre coût.
+
+### Trois corrections architecturales, chacune sourcée
+
+1. **`SNESSetFunctionDomainError()`** (doc PETSc, exemple officiel : *"a step with negative pressure"*) : dans le callback résidu, interpoler `J` sur DG0 (peu coûteux vs assemblage complet) AVANT d'assembler ; si `J<=0` ou NaN, appeler `snes.setFunctionDomainError()` et sortir sans assembler. Économise l'essentiel des 52s par tentative rejetée. Line search conservé en `bt` (pas de trust-region : `newtontr` est pensé pour la minimisation d'objectif, pas pour un domaine de validité physique comme J>0).
+
+2. **Pression adimensionnée `p_hat = p/kappa`** : le déséquilibre d'échelle u(mm)~1-10 vs p(Pa)~1e5 biaisait la direction de Newton (ligne "pression" du jacobien dominait numériquement la ligne "déplacement"). Reformulation `Pi_vol = kappa*p_hat*(J-1) - kappa*p_hat^2/2` avec p_hat résolu directement (ordre O(1)). Pas de FieldSplit nécessaire (trop lourd à câbler proprement en API bas-niveau 0.7.3).
+
+3. **Continuation ultra-fine + restauration immédiate** : dlam initial 1e-4 (au lieu de 1/30), réduction ×0.3 sur rejet (au lieu de ×0.5), exigence de 2 succès faciles consécutifs avant de regonfler dlam, snapshot `w_accepted` uniquement après acceptation confirmée.
+
+### Incertitudes explicitement non résolues (à vérifier empiriquement)
+- Portée exacte de `setFunctionDomainError()` : interrompt-il tout `SNESSolve()` ou seulement la tentative de line search en cours ? La doc est ambiguë sur ce point précis. Test prévu : un seul palier avec `snes_linesearch_monitor` actif pour observer si λ décroît en interne avant que `reason` ne devienne négatif.
+- La reformulation p_hat change la structure du jacobien — à vérifier qu'à charge nulle le système résout bien vers p_hat≈0.
+
+### Statut
+P15 : stratégie de correction complète et sourcée, prête à tester sur `scripts/diag_snes_monitor.py` avant portage dans `fenicsx_solver.py`. Pas encore testée en exécution.
+
+
+### Suite immédiate (même nuit) — test des 3 correctifs : rapide mais résidu non-monotone
+
+Testé sur charge 0.01% (dlam=1e-4), maillage réduit (34025 tets). Résultat :
+- **Plus de blocage multi-minutes** : le solve termine sa 1ère itération en secondes (vs 14+ min hier). Aucun NaN, aucun domain error déclenché à cette charge très faible.
+- **Anomalie nouvelle** : le line search bt (order=2) enchaîne 8 réductions de lambda (1.0 -> 4.36e-4), mais le gnorm affiché AUGMENTE de façon monotone (1.04e4 -> 4.40e4) à mesure que lambda DIMINUE. Mathématiquement, gnorm devrait tendre vers le résidu de l'itération précédente (1.04e4) quand lambda->0, pas diverger. Itération 1 acceptée malgré un résidu 4x plus grand qu'itération 0.
+
+**Deux causes possibles, non tranchées :**
+1. Bug dans le wrapper `_SNESProblem.F()` (synchronisation ghost/vecteurs entre appels répétés du line search, ou incohérence entre l'état lu par le garde-fou J et l'état assemblé).
+2. Artefact d'affichage : le fit quadratique (order=2) de `bt` peut afficher des valeurs extrapolées par le modèle plutôt que des réévaluations fraîches à chaque lambda imprimé.
+
+**Piste de reprise immédiate** : retester avec `snes_linesearch_order=1` (backtracking simple, sans fit quadratique/cubique) pour voir si le gnorm affiché redevient monotone décroissant vers la valeur initiale quand lambda->0 — ça distinguera un vrai bug (persiste) d'un artefact d'affichage du modèle (disparaît en order=1).
+
+**Statut** : 3 correctifs (domain error, p_hat, continuation fine) validés comme n'aggravant rien et supprimant le blocage de plusieurs minutes. Nouvelle anomalie de non-monotonie du résidu affiché à investiguer avant de considérer la convergence acquise. Pas de commit — code en l'état à retester.
+
+### Suite (même journée) — bug identifié dans la reformulation p_hat, run interrompu
+
+Continuation lancée avec p_hat=p/kappa : palier 1 accepté (min_J=0.97, domain_err=0, convergence Newton propre après 1er pas), mais palier 2 reproduit EXACTEMENT la même trajectoire (même besoin de 6 réductions de line search jusqu'à lambda=1/64, même nombre d'itérations). dlam reste figé à 1e-4 (seuil consecutive_easy jamais atteint). Rythme mesuré (~1600-1700s/palier) rendrait un run complet impraticable (des centaines d'heures).
+
+**Cause identifiée** : erreur de dérivation en chaîne dans la reformulation p_hat. En dérivant l'énergie par rapport à p_hat=p/kappa au lieu de p, dPi/dp_hat = kappa * dPi/dp — la substitution AMPLIFIE le déséquilibre d'échelle résiduelle d'un facteur kappa (~1e6) au lieu de l'atténuer. C'est l'inverse de l'effet recherché.
+
+**Correction** : revenir à p (Pa, non substitué) comme inconnue primale. Le KSP/MUMPS gère déjà bien ce cas (confirmé le 07/07 : résolution en 1 itération, 2e6->1.5e-8). Garder les 2 autres correctifs (domain error guard, continuation fine) qui semblent être la vraie source d'amélioration observée.
+
+**Statut** : run interrompu volontairement (pas d'échec silencieux). Reprise immédiate avec p direct.
+
+---
+
+## Session 2026-07-08 — P15 : formulation p-directe validée, continuation lancée en fond nocturne
+
+**Correctif majeur** : bug identifié dans la reformulation p_hat de la veille — dérivation en chaîne (dPi/dp_hat = kappa*dPi/dp) amplifiait le déséquilibre d'échelle au lieu de l'atténuer. Retour à p direct (Pa) : palier 1 passe en 3 itérations avec pas complet (aucun backtracking), contre 7 itérations + 6 réductions de line search avec p_hat. Correction confirmée décisive.
+
+**Run de continuation lancé** (petit maillage, 34025 tets, 209864 DOFs), formulation p-directe + garde-fou domain error + continuation adaptative (dlam0=1e-4) :
+
+| Résultat après 14 paliers, ~3h34 (12833s) |
+|---|
+| lam=0.001176 (0.12% de la charge totale) |
+| min_J=0.7787, décroissance monotone et physiologique (0.97→0.78) |
+| domain_err_total=0 sur toute la durée — jamais de NaN, jamais d'inversion |
+| 2 rejets de palier bien gérés par la continuation (reason=-9, LINE_SEARCH), tous deux dans une zone de raideur locale autour de lam≈0.0009-0.0013, franchie après réduction de dlam |
+| Coût par palier très irrégulier : 445s à 2532s selon la difficulté locale |
+
+**Diagnostic** : la formulation mixte P2-P1 + p direct + garde-fou + continuation adaptative fonctionne correctement et de façon robuste (auto-correction sur rejet, jamais de blocage). MAIS le coût par palier est trop élevé et irrégulier pour atteindre lam=1.0 en temps praticable par cette seule voie, a fortiori sur le maillage complet (242708 tets, 7x plus gros).
+
+**Décision** : run laissé tourner en fond toute la nuit (aucun coût, caffeinate actif) pour voir jusqu'où il progresse sans intervention. Pas d'attente d'aboutissement complet ce soir.
+
+**Pistes pour la suite si le run n'aboutit pas d'ici demain** :
+1. Accepter un résultat partiel (ex. lam=0.3-0.5, charge physiologique partielle) comme preuve de concept suffisante, plutôt que viser lam=1.0 exact.
+2. Réduire encore le maillage de test (déjà réduit à 34K tets) pour un cycle de développement plus rapide, quitte à ne valider le maillage complet qu'une fois la stratégie de continuation bien calée.
+3. Revoir kappa_vol (actuellement 1e6) : peut-être un peu trop raide, contribuant au coût élevé par palier même si la formulation reste stable.
+4. Envisager mpirun -n 4 (8 CPU disponibles depuis ce soir, Docker Desktop reconfiguré à 8 CPU/24GB) pour accélérer l'assemblage+factorisation par palier.
+
+**Statut** : P15 formulation validée et robuste. Praticabilité du temps de calcul en continuation complète = point ouvert, à réévaluer selon résultat du run nocturne.

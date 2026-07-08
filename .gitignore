@@ -24,3 +24,5 @@ models/
 fenicsx_*.log
 *_run.log
 fenicsx_*.log
+diag_snes*.log
+continuation_full*.log
