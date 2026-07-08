@@ -1302,3 +1302,23 @@ Gain de vitesse mesure : palier 1 en 52.3s (contre ~823-830s sur maillage fin) =
 **Conclusion** : ce run valide la MECANIQUE (convergence stable jusqu'a charge complete, deplacements dans l'ordre de grandeur physiologique correct, volume quasi conserve) mais PAS la physiologie fine. Ne pas utiliser ces chiffres (EF, deplacements precis) pour une conclusion clinique -- refaire avec de vraies fibres LDRB avant toute exploitation scientifique du resultat.
 
 **Prochaine etape** : generer des fibres LDRB physiologiques sur le maillage grossier (ou reutiliser LDRB existant si transferable), relancer la continuation avec fibres correctes pour un resultat exploitable.
+
+### Suite (2026-07-09 nuit) — Cause de l'anomalie epi/endo identifiee : resolution radiale insuffisante
+
+**Test avec vraies fibres LDRB** (app/fibers/ldrb.py, deja utilise en production) : anomalie epi>endo PERSISTE quasi identique (endo=-3.32mm, epi=-5.26mm vs -4.77/-6.30 avec fibres tangentielles). Ecarte l'hypothese "fibres simplifiees" comme cause.
+
+**Diagnostic geometrique** (span radial par element touchant la coupe mediane) :
+- Epaisseur paroi totale : 17.59mm
+- Span radial median par tetraedre : 5.605mm = 31.9% de l'epaisseur totale
+- 1329/2354 elements (56%) ont un span > 30% de l'epaisseur
+- 390/2354 elements (17%) ont un span > 50% de l'epaisseur
+
+**Conclusion** : seulement ~3-4 elements traversent radialement toute la paroi. Resolution structurellement insuffisante pour resoudre un gradient transmural endo/epi fiable, quelle que soit la qualite du champ de fibres. C'est un defaut geometrique du maillage grossier (target_mm=5.0), pas un bug de formulation ni de fibres.
+
+**Decision sur la resolution de maillage (question posee plus tot dans la session)** :
+- Maillage grossier (5686 tets) : VALIDE pour developpement rapide / validation de stabilite numerique du solveur (ce qui a ete fait avec succes, 2x, lam=1.0 a chaque fois).
+- Maillage grossier : NON SUFFISANT pour toute metrique dependant du gradient transmural (epaississement pariétal, contrainte radiale, deplacement endo vs epi separement).
+- Pour le DoE final (500 sims), si des metriques transmurales sont necessaires : repasser au maillage fin (1.5mm, 57058 noeuds) est requis, avec le cout de calcul associe (a re-attaquer : MPI, ou accepter un temps de calcul long par run).
+- Si le DoE ne necessite que des metriques globales (volume, EF globale, pression VG) : le maillage grossier pourrait suffire -- a valider specifiquement selon les besoins du surrogate GP/MeshGraphNets en aval.
+
+**Statut P15** : formulation mecanique validee de bout en bout (2 convergences completes, fibres tangentielles ET LDRB). Limite de resolution du maillage de developpement identifiee et documentee, distincte de la formulation elle-meme.

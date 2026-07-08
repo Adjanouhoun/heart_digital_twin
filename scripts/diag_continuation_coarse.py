@@ -13,7 +13,7 @@ import numpy as np
 
 MESH_DIR = "/cdt/reports/meshes_acdc/meshes"
 PATIENT = "patient001_coarse5"
-CHECKPOINT_PATH = "/cdt/continuation_coarse_checkpoint.npz"
+CHECKPOINT_PATH = "/cdt/continuation_coarse_ldrb_checkpoint.npz"
 
 print("=== Chargement maillage GROSSIER (pas de filtrage supplementaire) ===", flush=True)
 with open(f"{MESH_DIR}/{PATIENT}.pts") as f:
@@ -24,7 +24,7 @@ with open(f"{MESH_DIR}/{PATIENT}.elem") as f:
     elements_final = np.array([
         list(map(int, f.readline().split()[1:5])) for _ in range(n_elem)
     ], dtype=np.int64)
-with open(f"{MESH_DIR}/{PATIENT}_fibers.lon") as f:
+with open(f"{MESH_DIR}/{PATIENT}_fibers_ldrb.lon") as f:
     n_fib = int(f.readline())
     fibers = np.array([list(map(float, f.readline().split())) for _ in range(n_fib)])
 

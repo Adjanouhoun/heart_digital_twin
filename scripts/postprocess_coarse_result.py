@@ -15,7 +15,7 @@ import numpy as np
 
 MESH_DIR = "/cdt/reports/meshes_acdc/meshes"
 PATIENT = "patient001_coarse5"
-CHECKPOINT_PATH = "/cdt/continuation_coarse_checkpoint.npz"
+CHECKPOINT_PATH = "/cdt/continuation_coarse_ldrb_checkpoint.npz"
 
 print("=== Chargement maillage + checkpoint ===", flush=True)
 with open(f"{MESH_DIR}/{PATIENT}.pts") as f:
