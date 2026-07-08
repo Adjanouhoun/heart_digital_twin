@@ -13,31 +13,40 @@ Formulation MIXTE quasi-incompressible (Taylor-Hood P2-P1), p DIRECT (Pa) :
 Solveur : PETSc SNES 'newtonls' + line search 'bt' + garde-fou domaine
           (SNESSetFunctionDomainError, verif J avant assemblage complet),
           KSP direct LU/MUMPS, continuation ADAPTATIVE ultra-fine avec
-          restauration immediate sur rejet.
+          restauration immediate sur rejet + CHECKPOINT DISQUE (reprise
+          automatique apres interruption, valide sur DoE / runs longs).
 
-Historique complet du fix (P15), sessions 2026-07-06 -> 2026-07-08 :
-  v1 exp(b*(tr(C)-3)) NON isochore + kappa=1e4 trop faible + relaxation
-     fixe -> volume x1e11, fausse convergence a haute charge.
-  v2 isochore + kappa=1e6 + SNES/bt + GAMG -> min_J=1.0 (volume tenu) mais
-     GAMG diverge (reason=-3, penalite mal conditionnee).
-  v3 KSP direct LU/MUMPS (P1) -> min_J sain a faible charge (maillage OK),
-     mais line search bt echoue a haute charge (reason=-6) : LOCKING P1.
-  v4 formulation MIXTE P2-P1 -> locking leve, mais 1er solve bloque (NaN
-     sur inversion transitoire au 1er pas de Newton, bt boucle).
-  v5 tentative p_hat=p/kappa (adimensionnement) -> BUG : derivation en
-     chaine dPi/dp_hat=kappa*dPi/dp AMPLIFIE le desequilibre d'echelle au
-     lieu de l'attenuer (palier 1 : 7 iterations, 6 reductions de pas).
-  v6 (cette version) : retour a p DIRECT + garde-fou SNESSetFunctionDomainError
-     + continuation ultra-fine adaptative. Palier 1 : 3 iterations, PAS
-     COMPLET des le depart (aucun backtracking). Validation en cours sur
-     maillage reduit : formulation physiquement saine sur toute la
-     trajectoire testee (min_J decroit proprement 0.97->0.78, jamais de
-     NaN, domain_err_total=0), continuation auto-corrige sur rejet de
-     palier (zone de raideur locale franchie en reduisant dlam). Le point
-     ouvert est le TEMPS de calcul (~450-2500s/palier selon difficulte
-     locale), pas la validite physique.
+Historique complet du fix (P15), sessions 2026-07-06 -> 2026-07-09 :
+  v1-v5 : voir CDT_JOURNAL_TECHNIQUE.md (isochore -> kappa -> mixte P2-P1
+     -> bug p_hat -> retour p direct).
+  v6 : p direct + garde-fou domaine + continuation adaptative -> palier 1
+     en 3 iterations, PAS COMPLET (aucun backtracking). Committe 07-08.
+  v7 (2026-07-09 nuit) : VALIDATION COMPLETE lam=0 -> lam=1.0 (135kPa),
+     deux fois de suite, sur maillage reduit (patient001_coarse5, 5686
+     tets) :
+       - Run 1, fibres tangentielles simplifiees : 35 paliers, 0 rejet,
+         2585.9s, min_J final=0.567, deplacements -17.6/+9.8mm.
+       - Run 2, fibres LDRB reelles (app/fibers/ldrb.py) : 35 paliers,
+         0 rejet, 3682.5s, min_J final=0.503.
+     Goulot de vitesse identifie : assemblage FFCx (boucles C par
+     cellule), PAS MUMPS/KSP (1 iteration, rapide) ni BLAS (teste 1 vs 8
+     threads OpenBLAS, aucun effet). Scale avec le nb de tetraedres ->
+     d'ou l'usage d'un maillage reduit pour la validation rapide.
+     Anomalie observee (epi_radial_disp plus negatif que endo, persistante
+     avec fibres tangentielles ET LDRB) tracee a une cause GEOMETRIQUE :
+     seulement ~3-4 elements traversent radialement la paroi sur ce
+     maillage reduit (span radial median par element = 31.9% de
+     l'epaisseur pariétale totale) -> resolution insuffisante pour un
+     gradient transmural fiable, INDEPENDANT de la formulation ou des
+     fibres. Le maillage GROSSIER est valide pour dev/validation de
+     stabilite, mais PAS pour des metriques dependant du gradient
+     transmural (a reevaluer selon besoins DoE : maillage fin requis si
+     ces metriques sont necessaires en aval).
+     Ajout du CHECKPOINT DISQUE dans cette version (valide en pratique
+     lors des runs de cette nuit) pour proteger tout run long futur.
 """
 import time
+import os
 from dataclasses import dataclass
 from typing import Optional
 import numpy as np
@@ -61,12 +70,15 @@ class MechanicsParameters:
     base_bc_depth_mm: float = 5.0
     duration_ms: float = 500.0
     dt_ms: float = 1.0
-    # --- Parametres de continuation (P15 v6) ---
+    # --- Parametres de continuation (P15 v6/v7, valides en pratique) ---
     dlam_init: float = 1.0e-4
     dlam_min: float = 1.0e-6
     dlam_max: float = 0.05
     j_min_accept: float = 0.1
     max_continuation_steps: int = 500
+    # --- Checkpoint disque (P15 v7) : reprise apres interruption. None =
+    #     desactive (comportement identique aux versions precedentes). ---
+    checkpoint_dir: Optional[str] = None
 
 
 @dataclass
@@ -90,6 +102,7 @@ class MechanicsResult:
     min_jacobian: float = 0.0
     load_fraction: float = 0.0
     domain_errors_total: int = 0
+    resumed_from_checkpoint: bool = False
 
 
 class FenicsxSolver:
@@ -129,8 +142,15 @@ class FenicsxSolver:
                     min_J=round(result.min_jacobian, 4),
                     load=round(result.load_fraction, 4),
                     domain_errors=result.domain_errors_total,
+                    resumed=result.resumed_from_checkpoint,
                     duration_s=round(result.duration_seconds, 1))
         return result
+
+    def _checkpoint_path(self, params, twin_id, job_id):
+        if not params.checkpoint_dir:
+            return None
+        os.makedirs(params.checkpoint_dir, exist_ok=True)
+        return os.path.join(params.checkpoint_dir, f"{twin_id}_{job_id}_mech.npz")
 
     def _run_fenicsx(self, params, nodes, elements, fibers,
                       T_act_kPa, twin_id, job_id):
@@ -290,7 +310,8 @@ class FenicsxSolver:
 
         snes.setFromOptions()
 
-        # --- Continuation ADAPTATIVE ultra-fine + restauration immediate ---
+        # --- CHECKPOINT : reprise si un fichier existe deja ---
+        ckpt_path = self._checkpoint_path(params, twin_id, job_id)
         T_target_Pa = float(T_act_kPa * 1000.0)
         lam = 0.0
         dlam = params.dlam_init
@@ -298,10 +319,23 @@ class FenicsxSolver:
         dlam_max = params.dlam_max
         j_min_accept = params.j_min_accept
         max_steps = params.max_continuation_steps
+        n_steps_prev = 0
+        resumed = False
+
+        if ckpt_path and os.path.exists(ckpt_path):
+            ckpt = np.load(ckpt_path)
+            w.x.array[:] = ckpt["w_array"]
+            w.x.scatter_forward()
+            lam = float(ckpt["lam"])
+            dlam = float(ckpt["dlam"])
+            n_steps_prev = int(ckpt["n_steps"])
+            resumed = True
+            logger.info("mechanics.fenicsx.checkpoint_resumed",
+                        lam=round(lam, 6), n_steps_prev=n_steps_prev)
 
         w_accepted = w.x.array.copy()
         n_its_total = 0
-        n_steps = 0
+        n_steps = n_steps_prev
         min_J_global = 1.0
         consecutive_easy = 0
 
@@ -353,6 +387,12 @@ class FenicsxSolver:
                 consecutive_easy = consecutive_easy + 1 if its <= 4 else 0
                 if consecutive_easy >= 2:
                     dlam = min(dlam * 1.5, dlam_max)
+
+                if ckpt_path:
+                    tmp_path = ckpt_path + ".tmp.npz"
+                    np.savez(tmp_path, w_array=w_accepted, lam=lam, dlam=dlam,
+                             n_steps=n_steps, min_J=min_J_global)
+                    os.replace(tmp_path, ckpt_path)
             else:
                 w.x.array[:] = w_accepted
                 w.x.scatter_forward()
@@ -369,6 +409,11 @@ class FenicsxSolver:
 
         converged = lam >= 1.0 - 1e-9
         n_its = n_its_total
+
+        # Nettoyage du checkpoint une fois convergence complete atteinte
+        # (evite de reprendre un run deja termine par erreur)
+        if converged and ckpt_path and os.path.exists(ckpt_path):
+            os.remove(ckpt_path)
 
         # --- Post-traitement : extraire u (P2), re-interpoler sur P1 aux
         #     sommets pour le remap coordonnee (base sur "nodes") ---
@@ -401,12 +446,13 @@ class FenicsxSolver:
             active_tension_kPa=T_act_kPa * lam,
             endo_radial_disp_mm=endo_disp,
             epi_radial_disp_mm=epi_disp,
-            solver_version=f"fenicsx-{dolfinx.__version__}-mixedP2P1-pdirect",
+            solver_version=f"fenicsx-{dolfinx.__version__}-mixedP2P1-pdirect-ckpt",
             n_iterations=n_its,
             converged=converged,
             min_jacobian=float(min_J_global),
             load_fraction=float(lam),
             domain_errors_total=pde.n_domain_errors,
+            resumed_from_checkpoint=resumed,
         )
 
     def _run_fallback(self, params, nodes, elements, fibers,
