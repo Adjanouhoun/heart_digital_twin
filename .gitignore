@@ -28,3 +28,6 @@ diag_snes*.log
 continuation_full*.log
 continuation_mpi4.log
 opencarp_benchmark_run*.log
+continuation_fine_full.log
+continuation_fine_full_checkpoint.npz
+kappa_test_1e6.log
