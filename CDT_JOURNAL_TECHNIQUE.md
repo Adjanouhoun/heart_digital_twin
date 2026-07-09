@@ -1344,3 +1344,17 @@ Gain de vitesse mesure : palier 1 en 52.3s (contre ~823-830s sur maillage fin) =
 **Conclusion** : le solveur EP est valide sur ce benchmark independant -- propagation physiquement coherente (R2=0.985), anisotropie respectee qualitativement, et coherent avec la CV longitudinale deja etablie une fois l'angle de propagation pris en compte. SLO "activation +/-5ms" du projet non directement applicable ici (pas de tableau numerique publie du papier Niederer extrait pour comparaison point-par-point exacte), mais la coherence physique et la qualite de l'ajustement (R2) constituent une validation solide en l'absence de cette table precise.
 
 **A faire si validation plus stricte necessaire** : refaire le test avec stimulus/mesure le long de l'axe X pur (fibres) pour comparaison directe au CV longitudinal ; ou consulter le papier complet Niederer 2011 pour le tableau numerique exact des temps P1-P8 publies.
+
+### Suite (2026-07-09) — Bug MPI partitionnement : piste GhostMode testee et ecartee
+
+**Piste testee** (fondee sur inspection du code source dolfinx.mesh.create_mesh v0.7.x + issue GitHub FEniCS/dolfinx#994 "Bus errors when running in parallel inside Docker containers") : forcer explicitement GhostMode.shared_facet au lieu du GhostMode.none automatique choisi par dolfinx quand comm.size>1 sans partitionneur precise.
+
+**Resultat** : ECHEC identique sur les 4 rangs, meme erreur exacte ("A facet is connected to more than two cells"), sur les deux chemins internes (tentative directe ET repli TypeError->AdjacencyList_int64).
+
+**Conclusion** : le choix de GhostMode n'est PAS la cause. Le probleme est plus profond, dans la construction du graphe dual SCOTCH lui-meme face a la topologie de ce maillage en configuration multi-rang -- coherent avec l'issue #994 qui documente des problemes de fond avec SCOTCH necessitant un changement de partitionneur (KaHIP), or ceci exige une RECOMPILATION de dolfinx depuis les sources C++ (choix fait a la compilation, pas un parametre Python) -- non realisable dans le cadre actuel.
+
+**Decision** : chantier MPI ferme pour l'instant. Strategies alternatives pour le DoE 500 sims sans MPI :
+1. Accepter le mono-thread et etaler les simulations dans le temps (checkpoint disque deja valide protege la progression, pas de surveillance active necessaire).
+2. Chercher une resolution de maillage intermediaire (entre le grossier invalide pour le transmural et le fin trop lent) offrant un compromis cout/precision acceptable.
+
+**Statut P15/DoE** : formulation mecanique validee. Praticabilite du DoE 500 sims sur maillage fin reste un vrai defi de temps de calcul, a resoudre par etalement temporel ou resolution intermediaire, pas par parallelisme MPI (ferme).
