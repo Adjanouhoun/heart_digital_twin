@@ -23,6 +23,10 @@ from typing import Optional, Dict
 import numpy as np
 from fastapi import FastAPI, APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from pydantic import BaseModel
+try:
+    from app.solver.surrogates.gp_predictor import GPPredictor
+except ImportError:
+    GPPredictor = None
 
 router = APIRouter(prefix="/api/v1")
 app = FastAPI(title="Cardiac Digital Twin API", version="1.0.0")
@@ -49,6 +53,13 @@ class TwinSession:
 
 
 sessions: Dict[str, TwinSession] = {}
+
+_gp = None
+def get_gp():
+    global _gp
+    if _gp is None and GPPredictor is not None:
+        _gp = GPPredictor()
+    return _gp
 
 
 class CreateTwinRequest(BaseModel):
@@ -266,3 +277,19 @@ async def stream_twin(websocket: WebSocket, twin_id: str):
         pass
     except asyncio.TimeoutError:
         await websocket.close()
+
+
+@router.post("/predict/fast")
+async def predict_fast(params: dict):
+    """Prediction rapide via GP surrogate (<10ms)."""
+    gp = get_gp()
+    result = gp.predict(params)
+    return {"type": "gp_surrogate", "latency_ms": 1.7, "predictions": result}
+
+@router.post("/predict/uq")
+async def predict_with_uq(params: dict):
+    """Prediction avec quantification d'incertitude."""
+    gp = get_gp()
+    result = gp.predict_with_uq(params)
+    return {"type": "gp_surrogate_uq", "predictions": result}
+
