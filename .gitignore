@@ -31,3 +31,7 @@ opencarp_benchmark_run*.log
 continuation_fine_full.log
 continuation_fine_full_checkpoint.npz
 kappa_test_1e6.log
+continuation_fine_full_part1.log
+continuation_fine_full_v2.log
+continuation_fine_kappa1e5.log
+exception_diagnostic*.log

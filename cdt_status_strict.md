@@ -9,7 +9,7 @@
 
 | Livrable | Description | Statut | Reste a faire |
 |----------|-------------|--------|---------------|
-| D1.1 | nnU-Net v2 entraine et valide (ACDC / M&Ms / EMIDEC) | 85% | ACDC Dice MYO=0.910 (SLO 0.90 ATTEINT). M&Ms Dice=0.908 (validation generalisation). EMIDEC : scar=0.365, PMO=0.132 (insuffisant, retraining prevu avec oversample_foreground_percent=0.66, en attente quota Kaggle T4). |
+| D1.1 | nnU-Net v2 entraine et valide (ACDC / M&Ms / EMIDEC) | 85% | ACDC Dice MYO=0.910 (SLO 0.90 ATTEINT). M&Ms Dice=0.908 (validation generalisation). EMIDEC : scar=0.458, PMO=0.206 (ameliore via oversample_foreground_percent=0.66, +25%/+56% relatif, mais toujours insuffisant pour usage clinique -- branche parallele au chemin critique, pas bloquant, chantier en pause). |
 | D1.1 | Pipeline Airflow DAG : DICOM -> .mesh | 90% | DAG a 9 taches connecte bout-en-bout et valide. |
 | D1.2 | Fichiers .mesh + fibres pour 10 patients ACDC | 100% | 10/10 maillages valides (Gmsh reconstruit, sliver+dihedral filtering, resampling 1.5mm). Bug Z-spacing (9x) corrige. |
 | D1.2 | Rapport qualite maillage automatise | 80% | mesh_quality_report() existe. Pas integre dans Airflow. |

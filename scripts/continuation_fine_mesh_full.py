@@ -17,7 +17,7 @@ from app.core.units import filter_small_elements, filter_degenerate_dihedral
 
 MESH_DIR = "/cdt/reports/meshes_acdc/meshes"
 PATIENT = "patient001"
-CHECKPOINT_PATH = "/cdt/continuation_fine_full_checkpoint.npz"
+CHECKPOINT_PATH = "/cdt/continuation_fine_full_kappa1e5_checkpoint.npz"
 
 print("=== Chargement maillage FIN DE PRODUCTION ===", flush=True)
 with open(f"{MESH_DIR}/{PATIENT}.pts") as f:
@@ -77,7 +77,7 @@ C = F_def.T * F_def
 J = ufl.det(F_def)
 
 a_Pa, b = 0.496 * 1000.0, 7.209
-kappa = 1.0e6
+kappa = 1.0e5  # TEST : reduit x10 pour tester si la zone de raideur (lam~0.0076) est due a un Hessien mal conditionne du terme volumetrique
 J_reg = ufl.max_value(J, 1.0e-3)
 I1_bar = J_reg ** (-2.0 / 3.0) * ufl.tr(C)
 W_iso = (a_Pa / (2.0 * b)) * (ufl.exp(b * (I1_bar - 3.0)) - 1.0)
@@ -120,30 +120,51 @@ class P_:
         s.n_domain_errors = 0
 
     def F(s, snes, x, b):
-        x.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
-        x.copy(s.w.vector)
-        s.w.vector.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
         try:
-            s.J_func.interpolate(s.J_expr)
-            arr = s.J_func.x.array
-            finite = bool(np.isfinite(arr).all())
-            local_min = float(arr.min()) if finite and arr.size else -np.inf
-        except Exception:
-            finite, local_min = False, -np.inf
-        min_j = s.msh.comm.allreduce(local_min, op=MPI.MIN)
-        if (not finite) or (min_j <= 1.0e-2):
-            s.n_domain_errors += 1
-            snes.setFunctionDomainError()
-            return
-        with b.localForm() as bl: bl.set(0.0)
-        dolfinx.fem.petsc.assemble_vector(b, s.L)
-        dolfinx.fem.petsc.apply_lifting(b, [s.a], bcs=[[s.bc]], x0=[x], scale=-1.0)
-        b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-        dolfinx.fem.petsc.set_bc(b, [s.bc], x, -1.0)
+            x.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
+            x.copy(s.w.vector)
+            s.w.vector.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
+            try:
+                s.J_func.interpolate(s.J_expr)
+                arr = s.J_func.x.array
+                finite = bool(np.isfinite(arr).all())
+                local_min = float(arr.min()) if finite and arr.size else -np.inf
+            except Exception:
+                finite, local_min = False, -np.inf
+            min_j = s.msh.comm.allreduce(local_min, op=MPI.MIN)
+            if (not finite) or (min_j <= 1.0e-2):
+                s.n_domain_errors += 1
+                # setFunctionDomainError() N'EXISTE PAS dans petsc4py 3.20.0
+                # (verifie : AttributeError, bug decouvert le 2026-07-11 sur
+                # maillage fin -- jamais declenche avant car jamais atteint
+                # sur maillage grossier). Remplacement : residu enorme mais
+                # FINI (pas NaN, pas d'exception) pour forcer le line search
+                # a rejeter ce point sans dependre d'une API absente.
+                with b.localForm() as bl:
+                    bl.set(1.0e10)
+                return
+            with b.localForm() as bl: bl.set(0.0)
+            dolfinx.fem.petsc.assemble_vector(b, s.L)
+            dolfinx.fem.petsc.apply_lifting(b, [s.a], bcs=[[s.bc]], x0=[x], scale=-1.0)
+            b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+            dolfinx.fem.petsc.set_bc(b, [s.bc], x, -1.0)
+        except Exception as e:
+            import traceback
+            print("=== VRAIE EXCEPTION DANS F() (residu) ===", flush=True)
+            print(f"Type: {type(e).__name__}, Args: {e.args}", flush=True)
+            traceback.print_exc()
+            raise
 
     def J(s, snes, x, A, P):
-        A.zeroEntries()
-        dolfinx.fem.petsc.assemble_matrix(A, s.a, bcs=[s.bc]); A.assemble()
+        try:
+            A.zeroEntries()
+            dolfinx.fem.petsc.assemble_matrix(A, s.a, bcs=[s.bc]); A.assemble()
+        except Exception as e:
+            import traceback
+            print("=== VRAIE EXCEPTION DANS J() (jacobien) ===", flush=True)
+            print(f"Type: {type(e).__name__}, Args: {e.args}", flush=True)
+            traceback.print_exc()
+            raise
 
 
 pde = P_(F_form, w, bc, dF, msh, J_expr, DG0s)
@@ -207,7 +228,11 @@ while lam < 1.0 - 1e-9 and n_steps < MAX_STEPS:
     try:
         snes.solve(None, w.vector)
     except Exception as e:
-        print(f"[{time.time()-t_start:7.1f}s] EXCEPTION step={n_steps} target={target:.6f}: {e}", flush=True)
+        import traceback
+        print(f"[{time.time()-t_start:7.1f}s] EXCEPTION step={n_steps} target={target:.6f}", flush=True)
+        print(f"  Type: {type(e).__name__}", flush=True)
+        print(f"  Args: {e.args}", flush=True)
+        traceback.print_exc()
         w.x.array[:] = w_accepted
         w.x.scatter_forward()
         dlam *= 0.3

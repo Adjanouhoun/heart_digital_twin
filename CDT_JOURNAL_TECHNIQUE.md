@@ -1358,3 +1358,41 @@ Gain de vitesse mesure : palier 1 en 52.3s (contre ~823-830s sur maillage fin) =
 2. Chercher une resolution de maillage intermediaire (entre le grossier invalide pour le transmural et le fin trop lent) offrant un compromis cout/precision acceptable.
 
 **Statut P15/DoE** : formulation mecanique validee. Praticabilite du DoE 500 sims sur maillage fin reste un vrai defi de temps de calcul, a resoudre par etalement temporel ou resolution intermediaire, pas par parallelisme MPI (ferme).
+
+---
+
+## Session 2026-07-11/12 — EMIDEC : ré-entraînement avec oversampling corrigé, résultats mesurés
+
+**Objectif** : corriger les scores insuffisants sur les classes cicatrice (MI) et obstruction microvasculaire (PMO), identifiés precedemment (Dice=0.365/0.132), via `oversample_foreground_percent=0.66` (au lieu de 0.33 par defaut nnU-Net).
+
+**Infrastructure** : Kaggle notebook, dataset `emidec-upload` (100 cas, format nnU-Net standard), config `3d_fullres`, GPU T4. Trainer personnalise `nnUNetTrainerOversample066` (herite de `nnUNetTrainer`, surcharge `oversample_foreground_percent`).
+
+### Incidents resolus en cours de route
+1. Structure de dossier imbriquee (`Dataset029_EMIDEC/EMIDEC_upload/...` au lieu de `Dataset029_EMIDEC/...`) -- corrige par deplacement du contenu d'un niveau.
+2. Extensions de fichiers corrompues (`.niigz` au lieu de `.nii.gz`, point manquant) -- corrige par renommage systematique.
+3. Signature de `nnUNetTrainer.__init__` differente de la version documentee (5 params au lieu de 6, pas de `unpack_dataset`) -- verifie via `inspect.signature` avant d'ecrire le trainer personnalise, pas de tatonnement.
+4. Crash memoire `free(): corrupted unsorted chunks` dans le dataloader multi-thread au tout debut de l'entrainement -- resolu en desactivant `torch.compile` (`os.environ['nnUNet_compile'] = 'False'`). Cause precise non confirmee officiellement (issue GitHub MIC-DKFZ/nnUNet#2523 sans fix documente), mais correlation temporelle claire avec la compilation JIT active au moment du crash.
+
+### Progression de l'entrainement
+Entrainement lance a 13:19:53, epoch 0. Progression du EMA Pseudo Dice :
+- Epoch 0-100 : 0.0 -> 0.69 (montee rapide standard)
+- Epoch 100-235 : 0.69 -> 0.7091 (record final, epoch 235, 21:35:26)
+- Epoch 235-307+ : PLATEAU, aucun nouveau record sur 70+ epochs -> entrainement arrete manuellement (checkpoint_best.pth recupere avant fermeture de session).
+
+### Resultats de validation (20 cas, split interne 80/20)
+Evaluation via `nnUNetv2_predict` + `nnUNetv2_evaluate_folder` sur checkpoint_best (epoch 235) :
+
+| Classe | Avant (ancien run) | Apres (oversampling 0.66) | Delta |
+|---|---|---|---|
+| LV (1) | -- | 0.9451 | -- |
+| MYO (2) | -- | 0.8421 | -- |
+| MI/scar (3) | 0.365 | 0.4584 | +0.093 (+25% relatif) |
+| PMO (4) | 0.132 | 0.2064 | +0.074 (+56% relatif) |
+
+### Diagnostic
+Amelioration REELLE et mesurable sur MI/PMO, mais NON SUFFISANTE pour un usage clinique fiable (seuil habituel souhaite ~0.70-0.80 pour ces structures). Cause probable persistante : classes intrinsequement rares en nombre de voxels (ratio ~1:8 entre MI et LV observe sur cas individuel EMIDEC_0088 : n_ref=663 vs 5352), l'oversampling de patchs seul ne compense pas entierement le desequilibre de taille des structures. Pistes non testees pour aller plus loin : loss ponderee (Dice loss ponderee ou Focal loss) plutot que oversampling seul, plus d'epochs avec redemarrage du learning rate schedule.
+
+### Impact sur le projet -- IMPORTANT
+EMIDEC est une branche PARALLELE au chemin critique du projet, pas une etape bloquante. Le pipeline principal (patients ACDC standards, sans pathologie cicatricielle) fonctionne independamment de l'etat d'EMIDEC. Ce resultat n'est PAS encore utilisable pour personnaliser un maillage patient avec proprietes mecaniques/electriques modifiees dans les zones cicatricielles (precision insuffisante des frontieres predites, en particulier PMO a Dice=0.21). A reprendre uniquement si un patient avec pathologie cicatricielle devient un cas d'usage prioritaire pour le projet.
+
+**Statut** : EMIDEC ameliore mais non finalise. checkpoint_best.pth (epoch 235) sauvegarde localement. Chantier mis en pause, pas de suite immediate prevue.
