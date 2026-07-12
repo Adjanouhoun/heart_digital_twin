@@ -35,3 +35,9 @@ continuation_fine_full_part1.log
 continuation_fine_full_v2.log
 continuation_fine_kappa1e5.log
 exception_diagnostic*.log
+doe_ef_test.log
+doe_reference.log
+doe_test_*.log
+doe_results/
+doe_checkpoints/
+doe_full_results/

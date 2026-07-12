@@ -184,15 +184,17 @@ class FenicsxSolver:
         C = F_def.T * F_def
         J = ufl.det(F_def)
 
-        # --- Passif ISOCHORE ---
-        a_Pa = params.a_kPa * 1000.0
-        b = params.b
+        # --- Passif ISOCHORE (Constant : evite la recompilation FFCx entre
+        #     runs du DoE -- seule .value change, le .so compile est reutilise
+        #     pour les 500 simulations au lieu d'etre recompile a chaque fois) ---
+        a_Pa = dolfinx.fem.Constant(msh, PETSc.ScalarType(params.a_kPa * 1000.0))
+        b_const = dolfinx.fem.Constant(msh, PETSc.ScalarType(params.b))
         J_reg = ufl.max_value(J, 1.0e-3)
         I1_bar = J_reg ** (-2.0 / 3.0) * ufl.tr(C)
-        W_iso = (a_Pa / (2.0 * b)) * (ufl.exp(b * (I1_bar - 3.0)) - 1.0)
+        W_iso = (a_Pa / (2.0 * b_const)) * (ufl.exp(b_const * (I1_bar - 3.0)) - 1.0)
 
-        # --- Terme volumetrique en p DIRECT ---
-        kappa = params.kappa_vol
+        # --- Terme volumetrique en p DIRECT (kappa aussi en Constant) ---
+        kappa = dolfinx.fem.Constant(msh, PETSc.ScalarType(params.kappa_vol))
         Pi_vol = p * (J - 1.0) - 0.5 * p * p / kappa
         Pi = (W_iso + Pi_vol) * ufl.dx
 

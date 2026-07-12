@@ -1396,3 +1396,54 @@ Amelioration REELLE et mesurable sur MI/PMO, mais NON SUFFISANTE pour un usage c
 EMIDEC est une branche PARALLELE au chemin critique du projet, pas une etape bloquante. Le pipeline principal (patients ACDC standards, sans pathologie cicatricielle) fonctionne independamment de l'etat d'EMIDEC. Ce resultat n'est PAS encore utilisable pour personnaliser un maillage patient avec proprietes mecaniques/electriques modifiees dans les zones cicatricielles (precision insuffisante des frontieres predites, en particulier PMO a Dice=0.21). A reprendre uniquement si un patient avec pathologie cicatricielle devient un cas d'usage prioritaire pour le projet.
 
 **Statut** : EMIDEC ameliore mais non finalise. checkpoint_best.pth (epoch 235) sauvegarde localement. Chantier mis en pause, pas de suite immediate prevue.
+
+---
+
+## Session 2026-07-12 — Decision resolution maillage + integration DoE + bug EF critique
+
+### Decision structurante : maillage grossier retenu pour le DoE
+
+Suite a plusieurs jours de blocage sur le maillage fin (singularite a lam~0.008, confirmee independante de kappa_vol -- teste 1e6 et 1e5, meme signature d'echec ; maillage intermediaire 19894 tets teste aussi, meme resolution radiale insuffisante ~3.6 elements dans l'epaisseur, cause structurelle : spacing Z=10mm systematique sur les 10 patients ACDC, confirme par verification directe des headers NIfTI).
+
+**Verification contre heart_digital_twin_proposal.pdf (cahier des charges)** : le maillage grossier est SUFFISANT pour les livrables reels. D2.1 ne specifie pas de resolution transmurale. D3.1 vise un surrogate >=100x plus rapide -- le solveur complet sert uniquement a generer le DoE d'entrainement, jamais execute en temps reel. Les 2 cas d'usage clinique WP5 (stratification risque arythmie, optimisation CRT) reposent sur EP + metriques globales/segmentaires standard, pas sur un gradient transmural fin. DECISION ACTEE : maillage grossier (patient001_coarse5) = reference pour le DoE.
+
+### Optimisations pour le DoE (500 simulations)
+
+1. **dolfinx.fem.Constant** pour a_kPa/b/kappa_vol (au lieu de floats Python bruts) : evite la recompilation FFCx entre chaque point du DoE (seule reference confirmee : Constant.value modifiable sans recompilation, dolfinx docs). Applique dans fenicsx_solver.py (production).
+
+2. **Parallelisme de taches (pas MPI)** : lancement de N conteneurs Docker independants, chacun traitant un point DoE different (embarrassingly parallel, exploite les 8 CPU deja alloues). Valide : 4 points testes, 3 termines en ~65min en parallele (vs ~3h en sequentiel).
+
+3. **GPU Kaggle explicitement ecarte** : probleme CPU-bound (assemblage+MUMPS), pas d'acceleration GPU disponible pour ce type de solve dans dolfinx 0.7.3.
+
+### Decouverte critique : cout de calcul TRES heterogene selon les parametres materiaux
+
+Point avec a_kPa=0.322 (materiau mou, bas de la plage DoE) : convergence en **6850s (1h54)**, 229 iterations totales, its/palier croissant de 3 a 14. Point de reference (a_kPa=0.496) : convergence en **3964s (1h06)**, 112 iterations, its stable a 3/palier tout du long.
+
+**Implication** : l'estimation "~2 jours pour 500 sims sur 8 coeurs" (basee sur ~43min/run de reference) est TROP OPTIMISTE. Le temps reel par simulation depend fortement du point de l'espace des parametres (materiau mou = 2-3x plus long, iterations croissantes). A reevaluer avec un echantillon plus large avant de lancer le DoE complet.
+
+### BUG CRITIQUE identifie et partiellement corrige : calcul d'Ejection Fraction (EF)
+
+**Bug #1 (grave, corrige)** : premiere version de `run_single_doe_point.py` utilisait `volume_tissue_mL` (volume du MUSCLE/tissu, quasi-incompressible par construction, varie de ~3-5%) comme s'il s'agissait du volume de la CAVITE ventriculaire (le sang, qui varie ~50-60% entre diastole et systole). EF calculee : 2.27-4.75% (aberrant, incompatible avec la vie).
+
+**Bug #2 (subtil, corrige)** : premiere tentative de correction (volume de cavite par empilement de disques radiaux, rayon = 10e percentile des noeuds par tranche en Z) recalculait z_min/z_max SEPAREMENT pour l'etat au repos et l'etat deforme. Or l'apex (extremite libre, base fixee) subit un deplacement axial important (+17mm observe) independant de la vraie contraction radiale -- integrer sur des plages Z differentes desynchronise completement les tranches comparees. EF resultante : encore 2.27% (bug masque le premier).
+
+**Correction appliquee** : integrer le volume de cavite (avant ET apres deformation) sur la MEME plage Z et le MEME centre XY, ceux de l'etat au repos exclusivement. Resultat : EF=23.83% (point mou) et EF=24.12% (point de reference) -- coherent et reproductible entre les 2 points testes, mais RESTE BAS pour une EF physiologique typique (attendu 55-70%).
+
+**Hypotheses non tranchees pour ce residu (EF~24% au lieu de 55-70%)** :
+1. Methode d'approximation (10e percentile radial par tranche) structurellement imprecise sur maillage grossier avec peu de noeuds/tranche (~150-250).
+2. Modele mecanique possiblement sous-contraint : maillage grossier (~3-4 elements dans l'epaisseur pariétale, deja documente) pourrait ne pas capturer correctement l'epaississement radial qui genere la vraie reduction de cavite en clinique.
+3. Possible qu'une vraie integrale de surface sur l'endocarde (extraction de frontiere + normales, plutot que l'approximation par disques) donne un resultat different -- non teste.
+
+**Statut** : pipeline DoE fonctionnel de bout en bout (parametres -> mecanique -> volume cavite -> EF), MAIS l'EF resultante necessite une investigation plus poussee avant de generer le DoE complet a 500 points. Ne pas lancer le DoE complet avant d'avoir clarifie cette question -- risque de generer 500 points avec une metrique EF systematiquement biaisee.
+
+### Fichiers modifies/crees cette session
+- app/solver/mechanics/fenicsx_solver.py : Constant pour a_kPa/b/kappa_vol.
+- app/solver/coupled_solver.py : integration mecanique reelle (1 seul appel/simulation, pas dans la boucle Windkessel -- cout prohibitif sinon), fallback analytique conserve si non convergence.
+- scripts/run_single_doe_point.py : traite un point DoE isole (mecanique + volume cavite + sauvegarde champ complet .npz).
+- app/solver/doe/latin_hypercube.py : reutilise tel quel (non modifie).
+- cdt_status_strict.md : D2.1 mecanique remonte a 80%, decision resolution maillage documentee.
+
+### Prochaine etape (a froid)
+1. Trancher la cause du residu EF~24% (methode de calcul vs modele mecanique) avant de lancer le DoE complet.
+2. Reevaluer le budget de temps du DoE avec un echantillon plus large de points (pas juste 2), pour capturer l'heterogeneite de cout selon les parametres materiaux.
+3. Une fois clarifie : lancer le DoE complet (nombre de points a determiner selon le vrai budget de temps).

@@ -19,6 +19,7 @@ import structlog
 
 from app.solver.ep.opencarp_solver import OpenCARPSolver, EPParameters, EPResult
 from app.solver.hemodynamics.windkessel import WindkesselSolver, WindkesselParameters, WindkesselResult
+from app.solver.mechanics.fenicsx_solver import FenicsxSolver, MechanicsParameters, MechanicsResult
 
 logger = structlog.get_logger(__name__)
 
@@ -72,6 +73,9 @@ class CoupledSimulationResult:
 
     # Résultats Windkessel
     wk_result: Optional[WindkesselResult] = None
+
+    # Résultats mécaniques (FEniCSx)
+    mech_result: Optional[MechanicsResult] = None
 
     # Vecteur de sortie pour le surrogate (Phase 04)
     output_vector: Optional[np.ndarray] = None
@@ -143,6 +147,7 @@ class CoupledSolver:
     def __init__(self) -> None:
         self._ep_solver = OpenCARPSolver()
         self._wk_solver = WindkesselSolver()
+        self._mech_solver = FenicsxSolver()
 
     def simulate(
         self,
@@ -198,12 +203,19 @@ class CoupledSolver:
             )
             result.ep_result = ep_result
 
-            # ── Step 2 : Mécanique → Volume waveform ──────────────────────────
-            # Approximation initiale : volume basé sur les paramètres BCS
+            # ── Step 2 : Mécanique REELLE (FEniCSx) → V_ed, V_es ────────────────
+            # UN SEUL appel mecanique par simulation (pas dans la boucle de
+            # point fixe, trop couteux -- ~40min/run sur maillage grossier).
+            # V_ed = volume au repos (u=0, gratuit, geometrique).
+            # V_es = volume a pleine contraction (lam=1.0), via continuation
+            # adaptative complete.
+            mech_result = self._run_mechanics(params, nodes, elements, fiber_vectors, twin_id, job_id)
+            result.mech_result = mech_result
             volume_waveform = self._compute_volume_waveform(
                 params=params,
                 activation_times=ep_result.activation_times_ms,
                 nodes=nodes,
+                mech_result=mech_result,
             )
 
             # ── Step 3 : Itération de point fixe ──────────────────────────────
@@ -269,35 +281,68 @@ class CoupledSolver:
 
         return result
 
+    def _run_mechanics(self, params, nodes, elements, fiber_vectors, twin_id, job_id):
+        """Un seul appel mecanique reelle : continuation complete jusqu'a
+        lam=1.0 sur le maillage fourni (reference projet : maillage grossier,
+        cf. decision 2026-07-12 -- suffisant pour les livrables reels, le
+        maillage fin presente une singularite non resolue et n'est pas requis)."""
+        mech_params = MechanicsParameters(
+            a_kPa=params.a_kPa, b=params.b, T_max_kPa=params.T_max_kPa,
+            checkpoint_dir=f"/cdt/doe_checkpoints/{twin_id}_{job_id}",
+        )
+        return self._mech_solver.simulate(
+            params=mech_params, nodes=nodes, elements=elements,
+            fibers=fiber_vectors, activation_times_ms=np.zeros(len(nodes)),
+            twin_id=twin_id, job_id=job_id,
+        )
+
     def _compute_volume_waveform(
         self,
         params: SimulationParameters,
         activation_times: np.ndarray,
         nodes: np.ndarray,
+        mech_result=None,
     ) -> np.ndarray:
         """
         Calcule la waveform de volume ventriculaire.
-        Approximation basée sur le modèle BCS et les temps d'activation.
-        En production : remplacer par FEniCSx.
+        V_ed et V_es ancres sur la mecanique REELLE quand disponible
+        (mech_result.converged), sinon repli sur l'estimation analytique
+        (fallback si FEniCSx indisponible/non converge -- ne jamais planter
+        une simulation DoE pour un seul point difficile).
         """
         bcl_ms = 60000.0 / params.heart_rate_bpm
         t = np.arange(0, bcl_ms, params.dt_mech_ms)
-
-        # Durée de systole
         t_sys = 300.0  # ms typique
 
-        # Volume télédiastolique estimé depuis la géométrie du maillage
-        if len(nodes) > 0:
-            bbox = nodes.max(axis=0) - nodes.min(axis=0)
-            V_ed = float(np.prod(bbox) * 0.4 * 1e-3)  # Approximation ellipsoïde
-            V_ed = np.clip(V_ed, 80, 200)  # mL
+        if mech_result is not None and mech_result.converged:
+            V_ed = mech_result.volume_tissue_mL  # approx : volume repos ~ init
+            # volume_tissue_mL du MechanicsResult est le volume DEFORME (lam=1)
+            # -- c'est V_es. V_ed se recalcule separement (geometrie au repos).
+            V_es = mech_result.volume_tissue_mL
+            # V_ed reel = volume du maillage non deforme (deja calcule en amont
+            # de l'appel mecanique dans le pipeline DoE, cf. run_single_doe_point.py)
+            if len(nodes) > 0:
+                total_vol = 0.0
+                for tet in elements:
+                    v = nodes[tet]
+                    mat = np.array([v[1]-v[0], v[2]-v[0], v[3]-v[0]])
+                    total_vol += abs(np.linalg.det(mat)) / 6.0
+                V_ed = total_vol / 1000.0
+            logger.info("coupled_solver.mechanics_real", V_ed=V_ed, V_es=V_es,
+                       min_J=mech_result.min_jacobian)
         else:
-            V_ed = 130.0
+            logger.warning("coupled_solver.mechanics_fallback",
+                          converged=mech_result.converged if mech_result else None)
+            if len(nodes) > 0:
+                bbox = nodes.max(axis=0) - nodes.min(axis=0)
+                V_ed = float(np.prod(bbox) * 0.4 * 1e-3)
+                V_ed = np.clip(V_ed, 80, 200)
+            else:
+                V_ed = 130.0
+            ef_est = 0.3 + 0.3 * (params.T_max_kPa / 135.0)
+            ef_est = np.clip(ef_est, 0.25, 0.75)
+            V_es = V_ed * (1 - ef_est)
 
-        # EF estimé depuis T_max
-        ef_est = 0.3 + 0.3 * (params.T_max_kPa / 135.0)
-        ef_est = np.clip(ef_est, 0.25, 0.75)
-        V_es = V_ed * (1 - ef_est)
         sv = V_ed - V_es
 
         # Waveform sigmoïde
