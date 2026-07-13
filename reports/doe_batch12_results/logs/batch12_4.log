@@ -1,0 +1,41 @@
+=== DoE point 4 (job_id=doe_0004) ===
+Parametres : {'sigma_l': 0.1872857737319024, 'sigma_t': 0.08675037274527969, 'sigma_n': 0.030512676662666886, 'a_kPa': 0.25409739873692105, 'b': 11.85408790299696, 'a_f_kPa': 15.988629248897999, 'b_f': 17.394531795057652, 'T_max_kPa': 94.79062743682746, 'heart_rate_bpm': 79.6423108764523, 'R_p': 197070434.95689145}
+V_ed (cavite, repos) = 209.21 mL
+2026-07-13 01:22:38 [info     ] mechanics.fenicsx.available    version=0.7.3
+2026-07-13 01:23:50 [info     ] mechanics.fenicsx.load_step    T_act_kPa=0.009 dlam=0.0001 domain_err_total=0 its=2 lam=0.0001 min_J=0.9732
+2026-07-13 01:25:42 [info     ] mechanics.fenicsx.load_step    T_act_kPa=0.019 dlam=0.0001 domain_err_total=0 its=3 lam=0.0002 min_J=0.9503
+2026-07-13 01:27:31 [info     ] mechanics.fenicsx.load_step    T_act_kPa=0.033 dlam=0.00015 domain_err_total=0 its=3 lam=0.00035 min_J=0.9241
+2026-07-13 01:29:19 [info     ] mechanics.fenicsx.load_step    T_act_kPa=0.055 dlam=0.000225 domain_err_total=0 its=3 lam=0.000575 min_J=0.8989
+2026-07-13 01:31:08 [info     ] mechanics.fenicsx.load_step    T_act_kPa=0.086 dlam=0.000338 domain_err_total=0 its=3 lam=0.000913 min_J=0.8781
+2026-07-13 01:33:02 [info     ] mechanics.fenicsx.load_step    T_act_kPa=0.134 dlam=0.000506 domain_err_total=0 its=3 lam=0.001419 min_J=0.8495
+2026-07-13 01:34:56 [info     ] mechanics.fenicsx.load_step    T_act_kPa=0.206 dlam=0.000759 domain_err_total=0 its=3 lam=0.002178 min_J=0.8236
+2026-07-13 01:36:51 [info     ] mechanics.fenicsx.load_step    T_act_kPa=0.314 dlam=0.001139 domain_err_total=0 its=3 lam=0.003317 min_J=0.801
+2026-07-13 01:38:47 [info     ] mechanics.fenicsx.load_step    T_act_kPa=0.476 dlam=0.001709 domain_err_total=0 its=3 lam=0.005026 min_J=0.7814
+2026-07-13 01:40:41 [info     ] mechanics.fenicsx.load_step    T_act_kPa=0.719 dlam=0.002563 domain_err_total=0 its=3 lam=0.007589 min_J=0.7589
+2026-07-13 01:42:36 [info     ] mechanics.fenicsx.load_step    T_act_kPa=1.084 dlam=0.003844 domain_err_total=0 its=3 lam=0.011433 min_J=0.735
+2026-07-13 01:44:31 [info     ] mechanics.fenicsx.load_step    T_act_kPa=1.63 dlam=0.005767 domain_err_total=0 its=3 lam=0.0172 min_J=0.7131
+2026-07-13 01:46:27 [info     ] mechanics.fenicsx.load_step    T_act_kPa=2.45 dlam=0.00865 domain_err_total=0 its=3 lam=0.025849 min_J=0.6931
+2026-07-13 01:48:21 [info     ] mechanics.fenicsx.load_step    T_act_kPa=3.68 dlam=0.012975 domain_err_total=0 its=3 lam=0.038824 min_J=0.6747
+2026-07-13 01:50:17 [info     ] mechanics.fenicsx.load_step    T_act_kPa=5.525 dlam=0.019462 domain_err_total=0 its=3 lam=0.058286 min_J=0.6578
+2026-07-13 01:52:13 [info     ] mechanics.fenicsx.load_step    T_act_kPa=8.292 dlam=0.029193 domain_err_total=0 its=3 lam=0.087479 min_J=0.6422
+2026-07-13 01:54:07 [info     ] mechanics.fenicsx.load_step    T_act_kPa=12.443 dlam=0.043789 domain_err_total=0 its=3 lam=0.131268 min_J=0.6276
+2026-07-13 01:56:08 [info     ] mechanics.fenicsx.load_step    T_act_kPa=17.183 dlam=0.05 domain_err_total=0 its=3 lam=0.181268 min_J=0.6165
+2026-07-13 01:58:02 [info     ] mechanics.fenicsx.load_step    T_act_kPa=21.922 dlam=0.05 domain_err_total=0 its=3 lam=0.231268 min_J=0.6085
+2026-07-13 01:59:55 [info     ] mechanics.fenicsx.load_step    T_act_kPa=26.662 dlam=0.05 domain_err_total=0 its=3 lam=0.281268 min_J=0.6021
+2026-07-13 02:01:48 [info     ] mechanics.fenicsx.load_step    T_act_kPa=31.401 dlam=0.05 domain_err_total=0 its=3 lam=0.331268 min_J=0.5969
+2026-07-13 02:03:42 [info     ] mechanics.fenicsx.load_step    T_act_kPa=36.141 dlam=0.05 domain_err_total=0 its=3 lam=0.381268 min_J=0.5924
+2026-07-13 02:05:33 [info     ] mechanics.fenicsx.load_step    T_act_kPa=40.88 dlam=0.05 domain_err_total=0 its=3 lam=0.431268 min_J=0.5884
+2026-07-13 02:07:25 [info     ] mechanics.fenicsx.load_step    T_act_kPa=45.62 dlam=0.05 domain_err_total=0 its=3 lam=0.481268 min_J=0.5849
+2026-07-13 02:09:16 [info     ] mechanics.fenicsx.load_step    T_act_kPa=50.359 dlam=0.05 domain_err_total=0 its=3 lam=0.531268 min_J=0.5818
+2026-07-13 02:11:06 [info     ] mechanics.fenicsx.load_step    T_act_kPa=55.099 dlam=0.05 domain_err_total=0 its=3 lam=0.581268 min_J=0.5789
+2026-07-13 02:12:56 [info     ] mechanics.fenicsx.load_step    T_act_kPa=59.838 dlam=0.05 domain_err_total=0 its=3 lam=0.631268 min_J=0.5762
+2026-07-13 02:14:45 [info     ] mechanics.fenicsx.load_step    T_act_kPa=64.578 dlam=0.05 domain_err_total=0 its=3 lam=0.681268 min_J=0.5737
+2026-07-13 02:16:33 [info     ] mechanics.fenicsx.load_step    T_act_kPa=69.317 dlam=0.05 domain_err_total=0 its=3 lam=0.731268 min_J=0.5714
+2026-07-13 02:18:22 [info     ] mechanics.fenicsx.load_step    T_act_kPa=74.057 dlam=0.05 domain_err_total=0 its=3 lam=0.781268 min_J=0.5692
+2026-07-13 02:20:12 [info     ] mechanics.fenicsx.load_step    T_act_kPa=78.796 dlam=0.05 domain_err_total=0 its=3 lam=0.831268 min_J=0.5671
+2026-07-13 02:21:56 [info     ] mechanics.fenicsx.load_step    T_act_kPa=83.536 dlam=0.05 domain_err_total=0 its=3 lam=0.881268 min_J=0.5651
+2026-07-13 02:23:32 [info     ] mechanics.fenicsx.load_step    T_act_kPa=88.275 dlam=0.05 domain_err_total=0 its=3 lam=0.931268 min_J=0.5632
+2026-07-13 02:25:09 [info     ] mechanics.fenicsx.load_step    T_act_kPa=93.015 dlam=0.05 domain_err_total=0 its=3 lam=0.981268 min_J=0.5614
+2026-07-13 02:26:36 [info     ] mechanics.fenicsx.load_step    T_act_kPa=94.791 dlam=0.05 domain_err_total=0 its=3 lam=1.0 min_J=0.5607
+2026-07-13 02:26:36 [info     ] mechanics.complete             converged=True domain_errors=0 duration_s=3837.6 endo_disp=-2.916 its=104 load=1.0 min_J=0.5607 resumed=False twin_id=doe
+=== TERMINE : converged=True EF_cavite=15.08% duree=3837.6s ===

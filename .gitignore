@@ -41,3 +41,7 @@ doe_test_*.log
 doe_results/
 doe_checkpoints/
 doe_full_results/
+!reports/doe_batch12_results/
+!reports/doe_batch12_results/**
+!reports/doe_sensitivity_tmax/
+!reports/doe_sensitivity_tmax/**
