@@ -1,6 +1,6 @@
 """
 Genere des fibres via LDRBFiberGenerator (app/fibers/ldrb.py, deja utilise
-en production dans le pipeline Celery) pour patient001_coarse5.
+en production dans le pipeline Celery) pour patient001_coarse5_fixed.
 Remplace le champ tangentiel simplifie d'hier soir par une vraie variation
 transmurale (helice +60 endo -> -60 epi, regle de Bayer 2012), meme si les
 champs scalaires sous-jacents (apex-base, endo-epi) sont des proxys
@@ -14,7 +14,7 @@ import numpy as np
 from app.fibers.ldrb import LDRBFiberGenerator
 
 MESH_DIR = "reports/meshes_acdc/meshes"
-PATIENT = "patient001_coarse5"
+PATIENT = "patient001_coarse5_fixed"
 
 with open(f"{MESH_DIR}/{PATIENT}.pts") as f:
     n = int(f.readline())

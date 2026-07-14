@@ -45,3 +45,11 @@ doe_full_results/
 !reports/doe_batch12_results/**
 !reports/doe_sensitivity_tmax/
 !reports/doe_sensitivity_tmax/**
+tmax_cal_*.log
+tmax_zero_*.log
+test_mesh_fixed.log
+test_coupled_ef.log
+doe_bc_fix_test.log
+doe_results_fixed/
+doe_full_results_fixed/
+doe_checkpoints_fixed/

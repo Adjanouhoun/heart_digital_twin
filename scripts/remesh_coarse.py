@@ -13,8 +13,8 @@ import nibabel as nib
 from app.meshing.gmsh_mesher import CardiacMesher
 
 SEG_PATH = "reports/meshes_acdc/segmentations/patient001_seg.nii.gz"
-TARGET_MM = 3.5
-OUT_PREFIX = "reports/meshes_acdc/meshes/patient001_medium"
+TARGET_MM = 5.0
+OUT_PREFIX = "reports/meshes_acdc/meshes/patient001_coarse5_fixed"
 
 print(f"=== Chargement segmentation : {SEG_PATH} ===")
 img = nib.load(SEG_PATH)

@@ -87,8 +87,36 @@ class CardiacMesher:
         from skimage.filters import gaussian
         from scipy import ndimage
         # Remplir les trous internes (le myocarde en anneau peut avoir des trous
-        # dus au bruit de segmentation)
-        filled = ndimage.binary_closing(binary_mask, iterations=2).astype(float)
+        # dus au bruit de segmentation).
+        #
+        # BUG CRITIQUE CORRIGE (2026-07-13) : binary_closing(iterations=2)
+        # etait utilise ici. Ce n'est PAS un remplissage de trous mais une
+        # dilatation suivie d'une erosion, avec un element structurant
+        # ISOTROPE EN VOXELS. Or le masque ACDC est fortement anisotrope
+        # (spacing 1.5625 x 1.5625 x 10.0 mm) : +/-2 voxels valent +/-3.1mm
+        # en x/y mais +/-20mm en z. La dilatation debordait des bords du
+        # tableau (le masque n'a que 10 tranches) et etait tronquee, tandis
+        # que l'erosion suivante rongeait pleinement +/-20mm en z.
+        #
+        # Effet mesure sur patient001 : hauteur du myocarde 100mm -> 60mm
+        # (puis 55.6mm apres le lissage gaussien). Le ventricule etait
+        # ecrase de 44% dans l'axe long.
+        #
+        # Consequences en chaine (toutes resolues par ce correctif) :
+        #   - volume de cavite calcule 209mL au lieu de 295mL (verite terrain
+        #     ACDC, label 3, comptage voxels)
+        #   - EF structurellement bloquee a ~24% (SLO projet : +/-3% vs
+        #     reference clinique)
+        #   - PCA incapable de trouver un axe long (geometrie aplatie)
+        #   - base non plane, aucune facette basale detectable
+        #   - ~3-4 elements seulement dans l'epaisseur pariétale
+        #
+        # binary_fill_holes fait ce que le commentaire annoncait : il remplit
+        # les cavites internes fermees sans toucher a la geometrie externe.
+        # Verifie : hauteur restauree a 95mm (les 5mm d'ecart avec 100mm sont
+        # attendus, marching_cubes place l'isosurface a un demi-voxel des
+        # bords).
+        filled = ndimage.binary_fill_holes(binary_mask).astype(float)
 
         # Reechantillonner a la resolution cible (~1.5mm, spec projet) AVANT
         # marching_cubes. Cela controle la densite de la surface produite :
@@ -102,10 +130,27 @@ class CardiacMesher:
         else:
             effective_spacing = spacing_mm
 
-        # Lissage gaussien => surface reguliere, maillable
-        smoothed = gaussian(filled, sigma=1.0)
+        # PADDING (2026-07-13) : le myocarde touche les bords du tableau en z
+        # (les 10 tranches ACDC sont toutes occupees). marching_cubes coupe
+        # alors l'isosurface net a la frontiere du tableau -> surface OUVERTE
+        # (44 aretes de bord mesurees) que Gmsh refuse de mailler
+        # ("Wrong topology of boundary mesh for parametrization", puis 0 tet).
+        # Une bordure de vide (appliquee APRES le zoom, donc en voxels de la
+        # grille finale isotrope) permet a l'isosurface de se refermer.
+        # Verifie : 0 arete de bord, 0 arete non-manifold.
+        filled = np.pad(filled, pad_width=3, mode="constant", constant_values=0)
+
+        # Lissage gaussien => surface reguliere, maillable.
+        # sigma=1.0 erodait la geometrie de 21mm en z (100mm -> 78mm mesures).
+        # sigma=0.5 preserve la hauteur (99mm) tout en regularisant la surface
+        # et en simplifiant sa topologie (Euler -12 contre -18 sans lissage).
+        smoothed = gaussian(filled, sigma=0.5)
         verts, faces, normals, _ = marching_cubes(
             smoothed, level=0.5, spacing=effective_spacing, allow_degenerate=False)
+
+        # Compenser l'offset introduit par le padding pour restaurer les
+        # coordonnees physiques d'origine.
+        verts = verts - 3 * np.array(effective_spacing)
         self._write_stl(verts, faces, normals, output_path)
         return output_path
 
@@ -194,6 +239,45 @@ class CardiacMesher:
                 surfaces = gmsh.model.getEntities(2)
                 if not surfaces:
                     raise RuntimeError("Aucune surface apres createTopology")
+
+                # BUG CORRIGE (2026-07-13) : toutes les surfaces detectees
+                # etaient passees dans un SEUL SurfaceLoop. Or marching_cubes
+                # produit, en plus de l'enveloppe du myocarde, de petits
+                # fragments parasites issus du bruit de segmentation (mesure
+                # sur patient001 : surface principale = 5254 triangles /
+                # 46561 mm2 / 163 mL, contre 2 fragments de 24 et 132 triangles
+                # pres de l'apex). Regrouper des composantes disjointes dans un
+                # meme SurfaceLoop rend l'enveloppe incoherente : Gmsh declare
+                # "Found void region" pour chacune et ne produit AUCUN
+                # tetraedre ("No tetrahedra in region 1").
+                #
+                # L'enveloppe du myocarde est UNE SEULE surface fermee connexe
+                # (le myocarde est un anneau : epicarde et endocarde forment
+                # une frontiere unique de genre topologique eleve). On ne
+                # conserve donc que la composante de plus grande aire.
+                if len(surfaces) > 1:
+                    areas = []
+                    for dim, tag in surfaces:
+                        _, _, enodes = gmsh.model.mesh.getElements(dim, tag)
+                        tri = np.array(enodes[0]).reshape(-1, 3)
+                        ntags, ncoords, _ = gmsh.model.mesh.getNodes()
+                        xyz = {int(t): np.array(ncoords[3*i:3*i+3])
+                               for i, t in enumerate(ntags)}
+                        a = 0.0
+                        for i0, i1, i2 in tri:
+                            p0, p1, p2 = xyz[int(i0)], xyz[int(i1)], xyz[int(i2)]
+                            a += 0.5 * np.linalg.norm(np.cross(p1 - p0, p2 - p0))
+                        areas.append(a)
+                    keep = int(np.argmax(areas))
+                    logger.info("mesher.surface_selection",
+                                n_surfaces=len(surfaces),
+                                kept_tag=surfaces[keep][1],
+                                kept_area_mm2=round(areas[keep], 1),
+                                discarded=[round(a, 1)
+                                           for i, a in enumerate(areas)
+                                           if i != keep])
+                    surfaces = [surfaces[keep]]
+
                 sl = gmsh.model.geo.addSurfaceLoop([e[1] for e in surfaces])
                 gmsh.model.geo.addVolume([sl])
                 gmsh.model.geo.synchronize()

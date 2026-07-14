@@ -1,0 +1,24 @@
+{
+  "job_index": 1,
+  "job_id": "doe_0001",
+  "params": {
+    "sigma_l": 0.3,
+    "sigma_t": 0.12,
+    "sigma_n": 0.05,
+    "a_kPa": 0.496,
+    "b": 7.209,
+    "a_f_kPa": 15.193,
+    "b_f": 20.417,
+    "heart_rate_bpm": 70.0,
+    "R_p": 120000000.0,
+    "T_max_kPa": 90.0
+  },
+  "converged": true,
+  "duration_s": 7250.5,
+  "V_ed_cavity_mL": 294.99,
+  "V_es_cavity_mL": 199.167,
+  "ef_pct": 32.48,
+  "min_jacobian": 0.4652,
+  "load_fraction": 1.0,
+  "n_iterations": 122
+}

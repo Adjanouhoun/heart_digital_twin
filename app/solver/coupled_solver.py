@@ -215,6 +215,7 @@ class CoupledSolver:
                 params=params,
                 activation_times=ep_result.activation_times_ms,
                 nodes=nodes,
+                elements=elements,
                 mech_result=mech_result,
             )
 
@@ -296,38 +297,76 @@ class CoupledSolver:
             twin_id=twin_id, job_id=job_id,
         )
 
+    @staticmethod
+    def _integrate(y, x):
+        try:
+            return np.trapezoid(y, x)
+        except AttributeError:
+            return np.trapz(y, x)
+
+    def _cavity_volume_fixed_z(self, nodes_pos, z_min_ref, z_max_ref,
+                                 center_xy_ref, n_slices=40, percentile=10):
+        """
+        Volume de CAVITE (pas de tissu) par empilement de disques radiaux,
+        integre sur une plage Z et un centre XY FIXES (etat au repos).
+        Methode identique et validee dans scripts/run_single_doe_point.py
+        (session 2026-07-13 : stable sur percentile 3-25 et n_slices 10-80,
+        EF constante 18-27% sur 10 points DoE testes).
+
+        CRITIQUE : integrer sur le meme reperage anatomique pour l'etat
+        deforme, sinon le deplacement axial de l'apex libre fausse tout
+        le calcul (bug diagnostique et corrige le 2026-07-12).
+        """
+        z_edges = np.linspace(z_min_ref, z_max_ref, n_slices + 1)
+        z_centers = (z_edges[:-1] + z_edges[1:]) / 2
+        dz = z_edges[1] - z_edges[0]
+        areas = []
+        for zc in z_centers:
+            mask = np.abs(nodes_pos[:, 2] - zc) < dz / 2
+            if mask.sum() < 4:
+                areas.append(0.0)
+                continue
+            radii = np.linalg.norm(nodes_pos[mask][:, :2] - center_xy_ref, axis=1)
+            areas.append(np.pi * np.percentile(radii, percentile) ** 2)
+        return self._integrate(np.array(areas), z_centers) / 1000.0  # mm^3 -> mL
+
     def _compute_volume_waveform(
         self,
         params: SimulationParameters,
         activation_times: np.ndarray,
         nodes: np.ndarray,
+        elements: np.ndarray = None,
         mech_result=None,
     ) -> np.ndarray:
         """
-        Calcule la waveform de volume ventriculaire.
-        V_ed et V_es ancres sur la mecanique REELLE quand disponible
-        (mech_result.converged), sinon repli sur l'estimation analytique
-        (fallback si FEniCSx indisponible/non converge -- ne jamais planter
-        une simulation DoE pour un seul point difficile).
+        Calcule la waveform de volume de CAVITE ventriculaire (pas le
+        volume de tissu myocardique).
+
+        BUG CORRIGE (2026-07-13) : cette fonction utilisait
+        mech_result.volume_tissue_mL (volume du MUSCLE, quasi-incompressible,
+        ~3-5% de variation) pour V_ed ET V_es -- confondant volume de tissu
+        et volume de cavite (le sang, ~50-60% de variation reelle). Meme
+        bug que celui deja identifie et corrige dans
+        scripts/run_single_doe_point.py, jamais reporte ici. Porte
+        maintenant la meme methode validee (empilement de disques,
+        reperage Z fixe).
         """
         bcl_ms = 60000.0 / params.heart_rate_bpm
         t = np.arange(0, bcl_ms, params.dt_mech_ms)
         t_sys = 300.0  # ms typique
 
-        if mech_result is not None and mech_result.converged:
-            V_ed = mech_result.volume_tissue_mL  # approx : volume repos ~ init
-            # volume_tissue_mL du MechanicsResult est le volume DEFORME (lam=1)
-            # -- c'est V_es. V_ed se recalcule separement (geometrie au repos).
-            V_es = mech_result.volume_tissue_mL
-            # V_ed reel = volume du maillage non deforme (deja calcule en amont
-            # de l'appel mecanique dans le pipeline DoE, cf. run_single_doe_point.py)
-            if len(nodes) > 0:
-                total_vol = 0.0
-                for tet in elements:
-                    v = nodes[tet]
-                    mat = np.array([v[1]-v[0], v[2]-v[0], v[3]-v[0]])
-                    total_vol += abs(np.linalg.det(mat)) / 6.0
-                V_ed = total_vol / 1000.0
+        if mech_result is not None and mech_result.converged and elements is not None:
+            z_min_ref = nodes[:, 2].min()
+            z_max_ref = nodes[:, 2].max()
+            center_xy_ref = nodes[:, :2].mean(axis=0)
+
+            V_ed = self._cavity_volume_fixed_z(
+                nodes, z_min_ref, z_max_ref, center_xy_ref)
+
+            nodes_deformed = nodes + mech_result.displacement_mm
+            V_es = self._cavity_volume_fixed_z(
+                nodes_deformed, z_min_ref, z_max_ref, center_xy_ref)
+
             logger.info("coupled_solver.mechanics_real", V_ed=V_ed, V_es=V_es,
                        min_J=mech_result.min_jacobian)
         else:
