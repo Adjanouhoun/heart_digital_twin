@@ -53,3 +53,8 @@ doe_bc_fix_test.log
 doe_results_fixed/
 doe_full_results_fixed/
 doe_checkpoints_fixed/
+*.log
+tmax_*.json
+doe_batch*_params.json
+sensitivity_*.json
+doe_results_archive/
