@@ -11,14 +11,14 @@
     "b_f": 20.417,
     "heart_rate_bpm": 70.0,
     "R_p": 120000000.0,
-    "T_max_kPa": 0.0
+    "T_max_kPa": 15.0
   },
   "converged": true,
-  "duration_s": 104.7,
+  "duration_s": 4499.1,
   "V_ed_cavity_mL": 294.99,
-  "V_es_cavity_mL": 294.99,
-  "ef_pct": null,
-  "min_jacobian": 1.0,
+  "V_es_cavity_mL": 233.008,
+  "ef_pct": 21.01,
+  "min_jacobian": 0.5413,
   "load_fraction": 1.0,
-  "n_iterations": 0
+  "n_iterations": 95
 }
