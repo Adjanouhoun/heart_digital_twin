@@ -1814,3 +1814,56 @@ gaussien + discretisation, systematique donc s'annulera dans l'EF=dV/V_ed.
 
 * validate_endo_volume.py : validation volume endo (ci-dessus).
 * shell_mesher.py : Voie A, laissee en l'etat (echec TetGen documente).
+
+---
+
+## Session 2026-07-15 (fin) — EF : EndoCavityVolume valide, vrai bug = BC basale
+
+### EndoCavityVolume (nouveau, remplace disques) : VALIDE
+
+app/solver/mechanics/endo_cavity_volume.py. Surface endo = label 3
+(marching_cubes, fermee par construction), volume par divergence,
+deplacement myo->endo par interpolation (tet le plus proche + barycentriques
+clampees, erreur EF <0.25 pt validee sur champ analytique).
+
+V_ed sur 4 patients : +0.4/-3.4/-1.9/-3.9% du GT. Premier estimateur regulier.
+Sur deplacement FEniCSx reel (doe_0000, converge, min_J=0.54) : deplacement
+RADIAL seul -> dV=-45 mL (contraction correcte). L'estimateur est bon.
+
+### Vrai bug : allongement axial systematique (BC basale)
+
+Sur les 9 points DoE (_fixed), SANS exception : le ventricule S'ALLONGE
+sous contraction (hauteur 99->117mm, apex descend -16 a -19mm), d'ou V_es >
+V_ed et EF NEGATIVE. Le radial est pourtant correct partout (dr -2 a -3.6mm).
+
+Diagnostic par elimination, chaque hypothese TUEE PAR UNE MESURE (pas supposee) :
+- translation corps rigide : retiree -> EF inchangee (volume invariant/translation). NON.
+- fibres non physiques : mesure |f0.z| mid=0.26 (circonferentiel correct),
+  0 degeneree, 0 fallback. Fibres LDRB SAINES. NON.
+- formulation active T*f0(x)f0 : standard litterature (S=S_pass+Ta f0xf0,
+  pas de terme actif transverse - expansion transverse = passive/incompress). OK.
+- incompressibilite : formulation p*(J-1)-p^2/2k propre ; kappa=1e6 vs mu~500Pa
+  -> ratio 2000, correct. Fuite -1.2% = discretisation grossiere, mineure. OK.
+- BC basale : CONFIRMEE. Deplacement=0.000mm dans bande basale (BC marche),
+  et dZ_moyen par tranche = gradient monotone parfait 0 (base) -> -16.4mm (apex).
+
+CAUSE : ligne 221-230, encastrement basal TOTAL (u=0 sur les 3 composantes,
+bande 5mm). La base clouee empeche le raccourcissement du grand axe ; sous
+contraction incompressible, l'apex descend -> allongement. Litterature (doc
+contraction ventriculaire) : traitement des BC crucial pour la cinematique.
+Les disques masquaient ce mode (reprojection radiale aveugle a l'axial).
+
+### Correctif (a faire, prochaine session)
+
+* BC basale GLISSANTE : bloquer seulement u_z sur le plan basal (base reste
+  dans son plan, libre de se contracter radialement) + ancrage minimal
+  (3 points) contre le mode de corps rigide. Standard physiologique.
+* Re-valider EF sur patient001 via EndoCavityVolume (reference 23.65%).
+* Puis brancher EndoCavityVolume dans coupled_solver (_compute_volume_waveform,
+  remplacer les 2 appels _cavity_volume_fixed_z).
+* Chercher le T_max du point doe_0000 pour comparer au SLO.
+
+### Fichiers
+
+* app/solver/mechanics/endo_cavity_volume.py : NOUVEAU, valide.
+* Fibres LDRB (patient001_coarse5_fixed_fibers_ldrb.lon) : saines, 2916 nodales.
