@@ -1603,3 +1603,214 @@ Le resultat ci-dessus est solide mais borne. A ne pas sur-interpreter :
   transmurale qui la motivait etait un artefact de l'ecrasement).
 * Valider le champ de deformation regional (pas seulement l'EF globale)
   avant WP5.
+
+---
+
+## Session 2026-07-15 — Investigation cavite : cause racine = maillage non tagge, solution = surfaces endo/epi/base
+
+### Contexte
+
+Spot-check de generalisation du fix binary_closing sur patient002/005/008.
+Deux resultats opposes.
+
+### Resultat 1 : le fix geometrie est valide et generique
+
+Regeneration via gmsh_mesher.py corrige (target_mm=5.0) :
+
+| Patient    | Z (mm) | V_tissu vs GT_myo (label 2) |
+|------------|--------|-----------------------------|
+| patient001 |  98.5  |  -9.7 %                     |
+| patient002 |  91.8  | -12.1 %                     |
+| patient005 |  99.6  |  -6.6 %                     |
+| patient008 |  99.5  | -11.6 %                     |
+
+Z restaure partout (plus d'ecrasement), volume de tissu coherent (~-10 %,
+signature du maillage grossier). Le maillage capture fidelement le myocarde
+sur les quatre. Decision de regenerer les 10 : maintenue.
+
+### Resultat 2 : l'estimateur de cavite (disques) est disqualifie
+
+Volume de cavite vs GT (label 3), trois methodes independantes :
+
+| Patient    | disques | voxel  | GT_cav  |
+|------------|---------|--------|---------|
+| patient001 |  -0.9 % | -6.6 % | 297.6mL |
+| patient002 | -29.9 % | -32.4% | 256.8mL |
+| patient005 | -22.9 % | -8.9 % | 288.7mL |
+| patient008 | -11.3 % | -28.7% | 282.7mL |
+
+Point d'honnetete : sur patient005 et patient008 les deux methodes
+DIVERGENT entre elles (-23 vs -9 ; -11 vs -29). Deux estimateurs qui ne
+s'accordent pas prouvent qu'aucun ne mesure la bonne chose. Le -0.9 % de
+patient001 (DCM tres dilate, cavite quasi-spherique) etait une coincidence
+geometrique, pas une validation. Une 3e tentative (divergence sur faces endo
+classees par signe de normale) a explose a +120/+370 % : le contour du patch
+endo n'est pas un anneau basal propre, capper la couture endo/epi injecte un
+volume parasite.
+
+### Cause racine (demontree)
+
+gmsh_mesher.py produit une COQUE MYOCARDIQUE A SURFACE UNIQUE, NON TAGGEE.
+Bug corollaire #2 du 2026-07-13 : on ne garde que "la composante de plus
+grande aire" -> endocarde, epicarde et plan basal sont fusionnes en un seul
+SurfaceLoop, distinction jetee. Tout estimateur de cavite a posteriori tente
+de reconstruire une info que le mailleur a detruite. Elle n'est pas dans le
+maillage.
+
+### Solution (standard etabli du domaine)
+
+Methode universelle (Oxford/Auckland/King's, LV Mechanics Challenge) :
+extraire la surface endocardique, la fermer par un lid basal (noeud au
+centroide du contour basal + eventail de triangles), normales sortantes
+coherentes, volume par theoreme de la divergence V = (1/3) flux(x.n dA).
+Applique IDENTIQUEMENT au repos et en deforme -> biais systematique s'annule
+dans l'EF. Definition basale = plan valvulaire coherent (mitral/aortique).
+
+Le tag endo/epi/base NE doit PAS venir d'une heuristique geometrique (echec
++370 %) mais de la donnee qu'on jette deja : le label 3 (cavite) de la
+segmentation ACDC. Face de bord endocardique si elle borde du label 3,
+epicardique si label 0, basale si plan Z superieur.
+
+### Convergence strategique : ce tag est deja exige par les fibres LDRB
+
+WP1 impose les fibres LDRB. LDRB exige IMPERATIVEMENT les memes tags
+endo/epi/base (lifex-fiber, ldrb/finsberg, pipeline Meshtool UK Biobank
+"CDT at Scale"). generate_simple_fibers.py (champ tangentiel simplifie) est
+un placeholder PRECISEMENT parce que le maillage n'a pas ces tags. Donc
+tagger les surfaces debloque DEUX livrables : volume de cavite correct (D2.1)
+ET vraies fibres LDRB (D1.1/WP1). Point de plus haut levier du pipeline.
+
+### Sequencage (ne s'ajoute pas, se replace)
+
+Le calcul de cavite n'est PAS un patch sur coupled_solver.py : c'est une
+propriete du mailleur (D1.2), a faire pendant la regeneration des 10.
+1. Mailleur : tagger endo/epi/base par adjacence au label 3.
+2. Cavite : surface endo + lid basal + divergence, meme lid repos/deforme.
+3. Fibres : remplacer generate_simple_fibers.py par LDRB (tags le permettent).
+4. Validation : V_ed maillage vs label 3 GT CLIPPE au meme plan basal
+   (apples-to-apples), 4 patients, cible qq %. Puis EF patient001 (ref 23.65 %).
+
+### A faire (mis a jour)
+
+* Tagger endo/epi/base dans gmsh_mesher.py (prochain geste).
+* Regenerer les 10 maillages avec tags + fibres LDRB.
+* Remplacer l'estimateur de cavite disques par endo+lid+divergence dans
+  coupled_solver.py (repos ET deforme).
+* Re-valider cavite sur 4 patients, puis EF patient001.
+* Reprendre le DoE sur geometrie correcte + metrique EF correcte.
+
+---
+
+## Session 2026-07-15 (suite) — Cavite : 4 echecs post-traitement, decision Voie A (coque deux-surfaces)
+
+### Preuve complete : aucun post-traitement ne marche
+
+Sur maillage myocardique a SURFACE UNIQUE (endo+epi fusionnes, bug corollaire
+#2 du 2026-07-13), quatre methodes de calcul de cavite, quatre echecs :
+
+| Methode                       | Resultat (patient001..008)        |
+|-------------------------------|-----------------------------------|
+| Disques (10e percentile)      | -0.9 % / -30 %, patient-dependant |
+| Voxel (fill_holes par tranche)| -6.6 % / -32 %, fuite anneau      |
+| Divergence normales + capping | +120 % / +370 %                   |
+| Distance signee + lid         | -56 % / -65 %, ring~30            |
+
+Signature commune : ring (composantes de la boucle basale endo) ~30 au lieu
+de 1. La surface endo n'existe pas comme surface fermee separable dans le
+maillage -> rien a extraire proprement. Le -0.9 % de patient001 (disques)
+etait une coincidence (DCM quasi-spherique), pas une validation.
+
+### Verification donnee (probe_cavity_label.py)
+
+Label 3 (cavite VG) sur patient001/002/005/008 : UNE composante connexe,
+0 trou, tranches z=0..9 contigues. Cavite propre, directement maillable.
+
+### Litterature (recherchee, pas supposee)
+
+Fedele et al. (lifex) : reconstruire endocarde et epicarde SEPAREMENT
+(endo = limite externe du sang ; epi = surface fermee cappee a l'anneau),
+puis connecter les deux surfaces a leur intersection. Strocchi (modele biV)
+et pipeline UK Biobank "CDT at Scale" (Meshtool) : tags endo/epi/base poses
+A LA GENERATION, jamais apres. lifex-ep : "volumetric tags must be defined
+during the mesh generation process".
+
+PIEGE identifie : la difference booleenne brute epi-endo dans Gmsh produit
+des triangles irreguliers et des regions etranglees a l'anneau valvulaire
+(Fedele, Fig.4). Un addVolume([epi,endo]) naif echouera a la base. La
+connexion basale doit etre geree explicitement.
+
+### Decision : Voie A (coque deux-surfaces taggee)
+
+1. endo_surface = marching_cubes sur (mask==3) rempli.
+2. epi_surface  = marching_cubes sur ((mask==2)|(mask==3)) rempli.
+3. Mailler la coque entre les deux, tags endo/epi/base a la generation.
+4. Volume cavite = divergence(endo + lid basal), repos ET deforme.
+5. Fibres LDRB depuis les tags endo/epi (debloque D1.1/WP1 au passage).
+
+Justification cahier des charges : necessaire pour LDRB et WP5 (strain
+regional). Chantier D1.2. Remplace _mask_to_stl (fusion actuelle).
+Point ouvert avant code : gestion de l'anneau basal (connexion endo-epi).
+
+### A faire
+
+* Resoudre la connexion basale endo-epi (recherche en cours).
+* Reecrire _mask_to_stl -> _build_shell (deux surfaces + tags).
+* Valider volume cavite vs GT clippe sur les 4 patients (cible qq %).
+* Etendre regen_coarse_batch aux 6 patients restants (003,004,006,007,009,010).
+* Puis DoE sur geometrie + metrique EF correctes.
+
+---
+
+## Session 2026-07-15 (fin) — Volume de cavite RESOLU : surface endo label 3 (Voie B)
+
+### Echec Voie A (coque deux-surfaces) et pivot
+
+Coque endo/epi maillee en volume : echec Gmsh en cascade.
+1. createGeometry/reparametrisation -> "Invalid boundary mesh for
+   parametrization" (meme mur que gmsh_mesher, contourne par createTopology).
+2. Entites discretes + createTopology -> passe, mais TetGen echoue :
+   "PLC Error: segment and facet intersect". Cause mesuree
+   (probe_intersect.py) : les 2 surfaces marching_cubes s'interpenetrent
+   (dist_min=0.00mm, 43-69 noeuds endo hors epi) sur paroi mince, aggravé
+   par le lissage separe. Inclusion par construction (dilatation 2mm) :
+   insuffisant.
+3. pygalmesh (CGAL direct sur image) : pas de roue arm64, compilation CGAL.
+4. meshtool : NE genere PAS depuis une image, manipule un maillage existant.
+
+Decision (avis ingenieur, regle profondeur avant largeur) : Voie B. La
+surface endo du label 3 suffit pour le VOLUME, sans la mailler en volume.
+
+### Resultat : valide sur les 4 patients
+
+Surface endo = marching_cubes sur (label 3) rempli+padde. Volume par
+divergence pure (surface DEJA fermee, rings=0, le padding referme la cavite).
+
+| Patient    | V_ed calcule | GT_cav (label 3) | ecart  |
+|------------|--------------|------------------|--------|
+| patient001 |   298.8 mL   |    297.6 mL      | +0.4 % |
+| patient002 |   248.1 mL   |    256.8 mL      | -3.4 % |
+| patient005 |   283.2 mL   |    288.7 mL      | -1.9 % |
+| patient008 |   271.7 mL   |    282.7 mL      | -3.9 % |
+
+Premier estimateur REGULIER de toute l'investigation. A comparer :
+disques -0.9/-30 %, voxel -6/-32 %, divergence-normales +370 %,
+distance-signee -65 %. Le biais (~-3 %, leger sous-estime) vient du lissage
+gaussien + discretisation, systematique donc s'annulera dans l'EF=dV/V_ed.
+
+### Ce qui reste (a froid) : branchement V_es
+
+* V_es : deplacer les noeuds de la surface endo (label 3) par le champ
+  FEniCSx interpole depuis la coque myocarde (noeuds endo sur face interne
+  du myo -> interpolation bien posee), puis meme fonction de volume.
+* EF = (V_ed - V_es) / V_ed. Base encastree -> pas de fuite basale.
+* Remplacer _cavity_volume_fixed_z (disques) dans coupled_solver.
+  _compute_volume_waveform, lignes 363-367.
+* Re-valider EF sur patient001 (reference 23.65 %).
+* Voie A (coque volumique taggee) = decision d'archi a froid pour fibres
+  LDRB + WP5 ; candidat identifie : biv-volumetric-meshing (openCARP,
+  pipeline UK Biobank, AppImage sans compilation).
+
+### Fichiers
+
+* validate_endo_volume.py : validation volume endo (ci-dessus).
+* shell_mesher.py : Voie A, laissee en l'etat (echec TetGen documente).
