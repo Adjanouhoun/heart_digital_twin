@@ -1867,3 +1867,43 @@ Les disques masquaient ce mode (reprojection radiale aveugle a l'axial).
 
 * app/solver/mechanics/endo_cavity_volume.py : NOUVEAU, valide.
 * Fibres LDRB (patient001_coarse5_fixed_fibers_ldrb.lon) : saines, 2916 nodales.
+
+---
+
+## Session 2026-07-15 (nuit) — Diagnostic pression endo : hypothese solide, test isole abandonne
+
+### Acquis
+
+* EndoCavityVolume commite (c0717b8), valide : V_ed +0.4/-3.9% GT sur 4 patients.
+* Bug EF = allongement axial +18mm sous contraction, sur les 9 points DoE.
+  Cause retenue par elimination (chaque hypothese TUEE par mesure) : PRESSION
+  ENDOCARDIQUE MANQUANTE. Ancre Land 2015 (probleme 3 = tension active +
+  pression 15 kPa, base fixee) et code (aucun terme de traction, verifie grep).
+* Facettes endo identifiables par predicat geometrique (rayon<mediane, hors
+  base) : ~2200 sur maillage myo. Suffisant pour une pression (pas besoin de
+  surface fermee, contrairement au volume).
+
+### Ce qui a echoue (et pourquoi)
+
+* falsify_pressure.py (script isole repliquant la meca) : NE CONVERGE PAS,
+  echec des lam=0.02 (T=1.2 kPa). Cause : NewtonSolver brut SANS le wrapper
+  _SNESProblem + garde-fou domaine (min_J) de fenicsx_solver.py. La robustesse
+  de convergence du solveur de PRODUCTION vient de ce wrapper, non replique.
+* Lecon : NE PAS reconstruire la meca dans un script separe. Tester la
+  pression DANS fenicsx_solver.py (qui converge jusqu'a T=135 kPa).
+* Run bloque 3h (boucle continuation non bornee sur non-convergence) -> kill.
+
+### A faire (a froid) - patch DEJA ECRIT (apply_pressure_patch.py)
+
+1. Appliquer apply_pressure_patch.py : ajoute p_endo_kPa, facettes endo,
+   terme pression suiveuse -P*J*inv(F).T*N sur ds_endo, increment avec lam.
+   -> dans fenicsx_solver.py (wrapper SNES robuste), PAS un script isole.
+2. Run BORNE (max_it plafonne, timeout dur) patient001, p_endo_kPa=15.
+   Verifier : allongement +18mm -> disparait, EF -> proche 23.65%.
+3. Si confirme : brancher pression Windkessel->meca (ferme boucle P->meca).
+4. Puis EndoCavityVolume dans coupled_solver + DoE.
+
+### Fichiers
+
+* apply_pressure_patch.py : patch pression pour fenicsx_solver (PRET, non applique).
+* falsify_pressure.py : ABANDONNE (convergence non robuste, cf ci-dessus).
