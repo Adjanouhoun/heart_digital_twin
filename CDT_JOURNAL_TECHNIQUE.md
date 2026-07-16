@@ -2017,3 +2017,56 @@ trop haute pour ce cas.
 * diag_stiffness.py : diagnostic qualite maillage + ratio P/mu.
 * scripts/diag_continuation_2phase.py, diag_continuation_pressure.py : variantes
   pression (calent sur les 2 causes, gardees pour reference).
+
+---
+
+## Session 2026-07-16 (suite) — CAUSE DE FOND : passif isotrope seul (termes de fibres non implementes)
+
+### Investigation calibration (existant + litterature)
+
+Question : a=0.496 kPa est-il correct ? Recherche Holzapfel-Ogden :
+* a (terme isotrope) varie 0.059 - 0.5 kPa selon etudes -> a=0.496 PLAUSIBLE,
+  pas aberrant. Ce n'est PAS une erreur de calibration de a.
+* MAIS le myocarde reel est ORTHOTROPE : termes de fibres a_f~15-18 kPa,
+  soit ~300x le terme isotrope. La rigidite vient des FIBRES, pas de l'isotrope.
+
+### Decouverte : la forme faible passive est AMPUTEE
+
+fenicsx_solver.py declare a_f=15.193, b_f=20.417, a_s=3.283, a_fs=0.662,
+b_fs=9.466 (dataclass lignes 62-67) MAIS ligne 213 : Pi = (W_iso + Pi_vol)*dx.
+Les termes de fibres ne sont JAMAIS utilises. Passif = ISOTROPE PUR.
+(Idem dans diag_continuation_coarse.py, le script qui a converge en juillet.)
+
+### Ceci explique TOUS les symptomes des 2 jours
+
+* mu_effectif ~ a*b = 3.6 kPa au lieu de ~15-18 kPa avec fibres.
+* Sous tension active : s'allonge au lieu de s'epaissir (pas de renfort
+  directionnel) -> EF negative, allongement +18mm STRUCTUREL.
+* Sous pression 15 kPa : ratio P/mu=4.2 -> instable -> non-convergence.
+* min_J plafonnait a 0.50 meme sans pression.
+
+Une seule cause de fond : loi de comportement passive sans partie orthotrope.
+
+### Correctif (code MANQUANT, pas recalibration)
+
+Ajouter W_aniso a la forme faible (modele Holzapfel-Ogden complet, params
+DEJA calibres et charges) :
+  I4f = f0.C.f0 ; I4s = s0.C.s0 ; I8fs = f0.C.s0
+  W_f  = a_f/(2 b_f) * (exp(b_f * <I4f-1>^2) - 1)   (<> = partie positive)
+  W_s  = a_s/(2 b_s) * (exp(b_s * <I4s-1>^2) - 1)
+  W_fs = a_fs/(2 b_fs) * (exp(b_fs * I8fs^2) - 1)
+  Pi = (W_iso + W_f + W_s + W_fs + Pi_vol) * dx
+Necessite s0 (sheet) en plus de f0 -> disponible via LDRB (.lon a 6 comp:
+fibre+sheet). Verifier que le .lon LDRB porte bien les sheets.
+
+### Ordre de reprise (a froid)
+
+1. Implementer W_aniso dans fenicsx_solver.py (params existants, s0 depuis LDRB).
+2. Re-tester convergence SANS pression : doit tenir mieux (mu ~4x plus grand),
+   et l'allongement doit diminuer (fibres canalisent la deformation).
+3. Puis pression : ratio P/mu ~1 -> devrait converger.
+4. Slivers maillage (cause 1) : a traiter si convergence encore difficile.
+5. Puis EF vs 23.65%, EndoCavityVolume, Windkessel.
+
+### Fichiers
+* fenicsx_solver.py : passif isotrope seul CONFIRME (ligne 213). A completer.
