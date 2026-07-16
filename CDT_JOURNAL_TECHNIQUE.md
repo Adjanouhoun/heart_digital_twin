@@ -1907,3 +1907,62 @@ Les disques masquaient ce mode (reprojection radiale aveugle a l'axial).
 
 * apply_pressure_patch.py : patch pression pour fenicsx_solver (PRET, non applique).
 * falsify_pressure.py : ABANDONNE (convergence non robuste, cf ci-dessus).
+
+---
+
+## Session 2026-07-16 — Reconciliation : l'allongement est STRUCTUREL, pas une regression
+
+### Investigation socle mecanique (l'existant vs la doc)
+
+Question : la mecanique a-t-elle DEJA converge, et dans quelles conditions ?
+Le journal documente 2 convergences lam=1.0 (2026-07-08, P15). Verification :
+
+* Checkpoint continuation_coarse_ldrb_checkpoint.npz : lam=1.0, min_J=0.503,
+  35 paliers, T=135kPa, maillage patient001_coarse5 + fibres LDRB. CONVERGE.
+* Le script diag_continuation_coarse.py (autonome, MUMPS, dlam_init=1e-4,
+  J_MIN=0.1) est le chemin qui converge -- PAS solver.simulate() teste hier.
+
+### Decouverte 1 : le run "reussi" de juillet etait sur GEOMETRIE ECRASEE
+
+Post-traitement du checkpoint (eval_ref_ef.py, sans re-resolution) :
+HAUTEUR repos = 55.6mm. C'est la geometrie AVANT le fix binary_closing
+(le journal : 55.62mm avant / 98.50 apres). Donc la "PREMIERE convergence
+complete" de juillet tournait sur un ventricule ecrase. Convergence reelle,
+mais geometrie buggee. A recadrer dans P15.
+
+### Decouverte 2 : l'allongement axial est STRUCTUREL (pas une regression)
+
+Deplacement du checkpoint applique via EndoCavityVolume :
+HAUTEUR 55.6 -> 68.3mm (+12.7mm), apex_dz=-10.9mm, V_ed=298.8 V_es=294.9
+EF=+1.3% a T=135kPa.
+
+=> Le run de reference S'ALLONGE AUSSI. L'allongement axial etait deja la
+en juillet, masque par la methode des disques. Ce n'est NI _fixed, NI une
+regression recente : c'est structurel a la formulation.
+
+Prouve sur DEUX maillages independants (coarse5 ecrase ET coarse5_fixed
+corrige) et DEUX charges (22 et 135 kPa) : la contraction sans pression
+endocardique allonge le ventricule. Diagnostic pression = FAIT reproductible.
+
+### Les deux problemes n'en font qu'un
+
+* "Convergence" (cale sur _fixed) et "allongement" (EF negative) etaient vus
+  comme 2 bugs. En realite :
+  - allongement = formulation incomplete (pression endo manquante) -> STRUCTUREL
+  - non-convergence sur _fixed = maillage plus raide (9439 tets, 98mm) que
+    coarse5 (5686 tets, 55mm) + mon dlam_init=0.01 d'hier (trop gros, le
+    journal recommande 1e-4). Distinct et secondaire.
+
+### Plan (une variable a la fois)
+
+1. Valider la PRESSION sur coarse5 (convergence acquise, 43min prouves),
+   avec les reglages du script qui marche : MUMPS + dlam_init=1e-4.
+   Verifier : allongement supprime, EF plausible.
+2. Puis porter au maillage _fixed (continuation fine).
+3. Puis brancher pression Windkessel -> meca.
+4. Unifier : un seul solveur (fenicsx_solver.py doit adopter MUMPS +
+   dlam_init du script diag qui converge ; les 2 chemins ont diverge).
+
+### Fichiers
+* eval_ref_ef.py : post-traitement checkpoint (EF sans re-resolution).
+* /tmp/endo_precomp.npz : surface endo + mapping (hors conteneur, skimage).
