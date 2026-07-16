@@ -1966,3 +1966,54 @@ endocardique allonge le ventricule. Diagnostic pression = FAIT reproductible.
 ### Fichiers
 * eval_ref_ef.py : post-traitement checkpoint (EF sans re-resolution).
 * /tmp/endo_precomp.npz : surface endo + mapping (hors conteneur, skimage).
+
+---
+
+## Session 2026-07-16 (fin) — Cause du non-convergence pression : 2 causes MESUREES
+
+### Elimination complete (chaque hypothese tuee par mesure)
+
+Pression endo fait caler le solveur des lam~0.02 (25 Pa). Diagnostic :
+* Signe du terme : CORRECT (traction radiale sortante, mediane +0.97, 80% >0). Ecarte.
+* Ordre de chargement : rampe 2-phases (inflation puis contraction, facon Land)
+  cale AUSSI en phase A (inflation pure) des lam=0.0017. Ecarte.
+* -> Ni signe, ni ordre. 2 causes reelles mesurees (diag_stiffness.py) :
+
+### Cause 1 : maillage coarse5 a des SLIVERS au repos
+
+qualite (Jac normalise) : min=0.0033, p5=0.10, median=0.48.
+267 tets <0.1 (~5%), 658 tets <0.2 (~12%). AVANT toute charge.
+Ces elements degeneres retournent (min_J->0) sous la moindre charge.
+Explique pourquoi meme le run juillet plafonnait a min_J=0.50.
+D1.2 croyait acquis mais maillage insuffisant. _filter_slivers(h_min=0.3)
+insuffisant.
+
+### Cause 2 : ratio pression/rigidite = 4.2 (pression ecrase le passif)
+
+mu ~ a*b = 0.496kPa * 7.209 = 3.58 kPa. Pression 15 kPa -> P/mu = 4.2.
+Land tient a P/mu ~1-2 (Guccione plus raide). 15 kPa sur un passif a 3.6 kPa
+deforme au-dela du raisonnable. Soit a=0.496 sous-calibre, soit pression cible
+trop haute pour ce cas.
+
+### Ce qui reste ACQUIS et solide
+
+* EndoCavityVolume : valide, commite (c0717b8). V_ed +0.4/-3.9% GT.
+* Allongement axial : STRUCTUREL (2 maillages, 2 charges), du a la pression
+  endo manquante. Confirme.
+* Patch pression : ecrit et correct (signe verifie). Mais bute sur les 2 causes
+  ci-dessus, pas sur la formulation.
+
+### Plan (a froid, ORDRE IMPORTANT)
+
+1. CAUSE 2 D'ABORD, par LECTURE (pas run) : verifier a=0.496 kPa vs litterature
+   Holzapfel-Ogden (myocarde ~1-10 kPa selon etudes) et vs notre calibration.
+   Fixer une rigidite/pression coherente (P/mu ~1-2).
+2. CAUSE 1 ENSUITE : ameliorer qualite maillage (remaillage optimise Gmsh/Mmg,
+   ou filtrage sliver plus agressif). Cible : min qualite >0.1, 0 tet <0.05.
+3. Puis re-tester pression sur maillage propre + parametres coherents.
+4. Puis EF vs 23.65%, branchement Windkessel, EndoCavityVolume dans coupled.
+
+### Fichiers
+* diag_stiffness.py : diagnostic qualite maillage + ratio P/mu.
+* scripts/diag_continuation_2phase.py, diag_continuation_pressure.py : variantes
+  pression (calent sur les 2 causes, gardees pour reference).
