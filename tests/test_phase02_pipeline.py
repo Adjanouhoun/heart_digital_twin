@@ -333,6 +333,13 @@ class TestLDRBFibers:
             norm = np.linalg.norm(sheet)
             assert abs(norm - 1.0) < 0.01, f"Sheet not unit: {norm}"
 
+    def test_fiber_sheet_vectors_are_orthogonal(self, tet_mesh_path, output_dir):
+        """The LDRB basis must be valid for Holzapfel-Ogden mechanics."""
+        lon = generate_ldrb_fibers(tet_mesh_path, output_dir, "test_patient")
+        values = np.loadtxt(lon, skiprows=1)
+        dots = np.sum(values[:, :3] * values[:, 3:6], axis=1)
+        assert np.allclose(dots, 0.0, atol=1e-5)
+
     def test_pts_file_created(self, tet_mesh_path, output_dir):
         generate_ldrb_fibers(tet_mesh_path, output_dir, "test_patient")
         pts = os.path.join(output_dir, "test_patient.pts")

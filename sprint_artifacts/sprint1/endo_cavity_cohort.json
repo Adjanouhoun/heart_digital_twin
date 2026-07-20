@@ -1,0 +1,34 @@
+{
+  "patients": [
+    {
+      "patient": "patient001",
+      "estimated_edv_mL": 298.81446701953604,
+      "ground_truth_edv_mL": 297.5830078125,
+      "relative_error_pct": 0.41382040462873215,
+      "absolute_relative_error_pct": 0.41382040462873215
+    },
+    {
+      "patient": "patient002",
+      "estimated_edv_mL": 248.11157181921803,
+      "ground_truth_edv_mL": 256.8470001220703,
+      "relative_error_pct": -3.401024072191088,
+      "absolute_relative_error_pct": 3.401024072191088
+    },
+    {
+      "patient": "patient005",
+      "estimated_edv_mL": 283.24083635784785,
+      "ground_truth_edv_mL": 288.68115234375,
+      "relative_error_pct": -1.8845414540343923,
+      "absolute_relative_error_pct": 1.8845414540343923
+    },
+    {
+      "patient": "patient008",
+      "estimated_edv_mL": 271.656401464095,
+      "ground_truth_edv_mL": 282.71484375,
+      "relative_error_pct": -3.91151810043756,
+      "absolute_relative_error_pct": 3.91151810043756
+    }
+  ],
+  "max_absolute_relative_error_pct": 3.91151810043756,
+  "mean_absolute_relative_error_pct": 2.402726007822943
+}

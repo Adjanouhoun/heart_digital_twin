@@ -1,0 +1,16 @@
+{
+  "purpose": "diagnostic_non_physiological",
+  "patient": "patient001_coarse5_fixed",
+  "T_max_kPa": 1.0,
+  "microstructure": "patient001_coarse5_fixed_fibers_bayer2012.lon",
+  "base_bc_mode": "normal_with_rigid_pins",
+  "converged": true,
+  "load_fraction": 1.0,
+  "iterations": 41,
+  "min_jacobian": 0.4463674704654869,
+  "domain_errors": 11,
+  "duration_seconds": 2461.231385707855,
+  "height_change_mm": -0.6771519843758966,
+  "apex_dz_mm": 0.983869868536023,
+  "max_displacement_mm": 7.60678560360793
+}

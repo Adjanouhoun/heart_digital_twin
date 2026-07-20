@@ -32,6 +32,9 @@ RUN pip install --no-cache-dir \
     psycopg2-binary==2.9.9 \
     numpy==1.26.4 \
     scipy==1.13.0 \
+    nibabel==5.4.2 \
+    adios4dolfinx==0.7.3 \
+    fenicsx-ldrb==0.1.4 \
     boto3==1.34.101 \
     "celery[redis]==5.4.0" \
     redis==5.0.4 \

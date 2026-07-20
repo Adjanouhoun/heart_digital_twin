@@ -1,0 +1,29 @@
+{
+  "patient": "patient001_coarse5_fixed",
+  "source_contract": "rule-based (LDRB) fibre generation",
+  "implementation": {
+    "apicobasal_coordinate": "normalised global z",
+    "transmural_coordinate": "normalised distance to global node centroid",
+    "laplace_problems_solved": 0,
+    "element_tags_used_by_transmural_solver": false
+  },
+  "counts": {
+    "nodes": 2916,
+    "valid_segmentation_distance_nodes": 2916
+  },
+  "basis_qc": {
+    "fiber_norm_max_abs_error": 7.915126867263922e-07,
+    "sheet_norm_max_abs_error": 7.700262034671113e-07,
+    "fiber_sheet_dot_max_abs": 1.3209660000568224e-06
+  },
+  "transmural_proxy_vs_segmentation": {
+    "pearson_correlation": 0.49499320556552956,
+    "mean_absolute_coordinate_error": 0.27340439043048703,
+    "p95_absolute_coordinate_error": 0.6080562209803535,
+    "nodes_coordinate_error_gt_0_25_pct": 49.45130315500686,
+    "mean_absolute_helix_angle_error_deg": 32.80852685165844,
+    "p95_absolute_helix_angle_error_deg": 72.96674651764242,
+    "nodes_helix_angle_error_gt_30deg_pct": 49.45130315500686
+  },
+  "verdict": "not_a_validated_LDRB_field"
+}

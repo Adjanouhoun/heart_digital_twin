@@ -1,0 +1,340 @@
+{
+  "method": "affine_P1_reconstruction_from_saved_nodal_displacements",
+  "limitation": "Diagnostic spatial uniquement: le J interne du solveur provient du champ P2 et ne peut pas \u00eatre reproduit exactement avec cette archive.",
+  "mesh": {
+    "nodes": 2916,
+    "elements": 9439
+  },
+  "reference_mesh_quality": {
+    "tetra_volume_mm3": {
+      "min": 0.012134987063406398,
+      "p01": 0.6506587786965781,
+      "median": 15.51395675229287
+    },
+    "edge_length_mm": {
+      "min": 0.3010040593613279,
+      "max": 13.27043878212111
+    },
+    "edge_matrix_condition_number": {
+      "median": 4.033287821420971,
+      "p95": 17.72324693004762,
+      "p99": 42.2193804527964,
+      "max": 737.6222918683134,
+      "fraction_over_50": 0.006674435851255429
+    }
+  },
+  "boundary_conditions": {
+    "base_depth_mm": 5.0,
+    "base_z_threshold_mm": 92.058983,
+    "anchor_a_mm": [
+      138.053909,
+      190.0,
+      95.0
+    ],
+    "anchor_b_mm": [
+      186.775818,
+      205.0,
+      95.0
+    ]
+  },
+  "case_1_kPa": {
+    "p1_reconstructed_j": {
+      "min": -13.435812266591912,
+      "p01": 0.7886071969405327,
+      "p05": 0.8844452805006894,
+      "median": 0.9967800704009623,
+      "max": 15.35131965705202,
+      "count_nonpositive": 11
+    },
+    "principal_stretches": {
+      "minimum_over_elements": 0.003546824616677817,
+      "maximum_over_elements": 24.234885037012507
+    },
+    "reference_quality_of_nonpositive_elements": {
+      "count": 11,
+      "condition_number_median": 117.50119171317876,
+      "condition_number_over_50_fraction": 0.9090909090909091,
+      "volume_mm3_median": 0.3601790512267231
+    },
+    "lowest_1_percent": {
+      "element_count": 95,
+      "centroid_z_mm_range": [
+        1.185911,
+        95.98125275
+      ],
+      "distance_to_base_plane_mm": {
+        "min": 0.0,
+        "median": 29.558982999999998
+      },
+      "distance_to_nearest_anchor_mm": {
+        "min": 6.989811029690377,
+        "median": 49.49474030060073
+      },
+      "fraction_inside_basal_bc_layer": 0.1368421052631579
+    },
+    "ten_lowest_elements": [
+      {
+        "element": 7123,
+        "J": -13.435812266591912,
+        "centroid_mm": [
+          142.5,
+          219.4922675,
+          1.185911
+        ],
+        "distance_to_base_plane_mm": 90.873072,
+        "distance_to_nearest_anchor_mm": 98.44107304561322
+      },
+      {
+        "element": 7129,
+        "J": -6.726763184560595,
+        "centroid_mm": [
+          176.61299125,
+          221.971737,
+          77.5
+        ],
+        "distance_to_base_plane_mm": 14.558982999999998,
+        "distance_to_nearest_anchor_mm": 26.411605485992027
+      },
+      {
+        "element": 7124,
+        "J": -5.746418039818894,
+        "centroid_mm": [
+          163.088951,
+          165.3168715,
+          81.556034
+        ],
+        "distance_to_base_plane_mm": 10.502949000000001,
+        "distance_to_nearest_anchor_mm": 37.63974471616981
+      },
+      {
+        "element": 7130,
+        "J": -4.936339234788329,
+        "centroid_mm": [
+          162.5,
+          165.46376775,
+          82.806034
+        ],
+        "distance_to_base_plane_mm": 9.252949000000001,
+        "distance_to_nearest_anchor_mm": 36.71962506637803
+      },
+      {
+        "element": 6614,
+        "J": -2.803594968694705,
+        "centroid_mm": [
+          191.231144,
+          231.20606975,
+          37.5
+        ],
+        "distance_to_base_plane_mm": 54.558983,
+        "distance_to_nearest_anchor_mm": 63.34712322993162
+      },
+      {
+        "element": 2912,
+        "J": -1.9471821423438034,
+        "centroid_mm": [
+          157.5,
+          234.5150185,
+          11.61816125
+        ],
+        "distance_to_base_plane_mm": 80.44082175,
+        "distance_to_nearest_anchor_mm": 93.17049355861258
+      },
+      {
+        "element": 6961,
+        "J": -1.2636076693715557,
+        "centroid_mm": [
+          140.80019375,
+          197.5,
+          93.15481375
+        ],
+        "distance_to_base_plane_mm": 0.0,
+        "distance_to_nearest_anchor_mm": 8.197364956208283
+      },
+      {
+        "element": 6888,
+        "J": -0.9615907364600699,
+        "centroid_mm": [
+          127.44362625,
+          202.5,
+          62.5
+        ],
+        "distance_to_base_plane_mm": 29.558982999999998,
+        "distance_to_nearest_anchor_mm": 36.401622217079115
+      },
+      {
+        "element": 6972,
+        "J": -0.4851748978192565,
+        "centroid_mm": [
+          162.5,
+          219.22037124999997,
+          95.73160175
+        ],
+        "distance_to_base_plane_mm": 0.0,
+        "distance_to_nearest_anchor_mm": 28.143730015361363
+      },
+      {
+        "element": 8950,
+        "J": -0.4378158421221873,
+        "centroid_mm": [
+          147.5,
+          166.870724,
+          72.5
+        ],
+        "distance_to_base_plane_mm": 19.558982999999998,
+        "distance_to_nearest_anchor_mm": 33.62204698504327
+      }
+    ]
+  },
+  "case_2_kPa": {
+    "p1_reconstructed_j": {
+      "min": -15.321765084535878,
+      "p01": 0.7243511091216361,
+      "p05": 0.8474538608382477,
+      "median": 0.9958568419100781,
+      "max": 18.58444317064655,
+      "count_nonpositive": 16
+    },
+    "principal_stretches": {
+      "minimum_over_elements": 0.017552187867248704,
+      "maximum_over_elements": 30.412563660907054
+    },
+    "reference_quality_of_nonpositive_elements": {
+      "count": 16,
+      "condition_number_median": 97.41861929791258,
+      "condition_number_over_50_fraction": 0.8125,
+      "volume_mm3_median": 0.536059303142967
+    },
+    "lowest_1_percent": {
+      "element_count": 95,
+      "centroid_z_mm_range": [
+        1.185911,
+        95.98125275
+      ],
+      "distance_to_base_plane_mm": {
+        "min": 0.0,
+        "median": 29.558982999999998
+      },
+      "distance_to_nearest_anchor_mm": {
+        "min": 6.989811029690377,
+        "median": 49.49474030060073
+      },
+      "fraction_inside_basal_bc_layer": 0.1368421052631579
+    },
+    "ten_lowest_elements": [
+      {
+        "element": 7123,
+        "J": -15.321765084535878,
+        "centroid_mm": [
+          142.5,
+          219.4922675,
+          1.185911
+        ],
+        "distance_to_base_plane_mm": 90.873072,
+        "distance_to_nearest_anchor_mm": 98.44107304561322
+      },
+      {
+        "element": 7129,
+        "J": -8.866209338588934,
+        "centroid_mm": [
+          176.61299125,
+          221.971737,
+          77.5
+        ],
+        "distance_to_base_plane_mm": 14.558982999999998,
+        "distance_to_nearest_anchor_mm": 26.411605485992027
+      },
+      {
+        "element": 7124,
+        "J": -8.228513290525457,
+        "centroid_mm": [
+          163.088951,
+          165.3168715,
+          81.556034
+        ],
+        "distance_to_base_plane_mm": 10.502949000000001,
+        "distance_to_nearest_anchor_mm": 37.63974471616981
+      },
+      {
+        "element": 7130,
+        "J": -7.0034542880625406,
+        "centroid_mm": [
+          162.5,
+          165.46376775,
+          82.806034
+        ],
+        "distance_to_base_plane_mm": 9.252949000000001,
+        "distance_to_nearest_anchor_mm": 36.71962506637803
+      },
+      {
+        "element": 6614,
+        "J": -3.6266234692948496,
+        "centroid_mm": [
+          191.231144,
+          231.20606975,
+          37.5
+        ],
+        "distance_to_base_plane_mm": 54.558983,
+        "distance_to_nearest_anchor_mm": 63.34712322993162
+      },
+      {
+        "element": 2912,
+        "J": -2.8661402572284165,
+        "centroid_mm": [
+          157.5,
+          234.5150185,
+          11.61816125
+        ],
+        "distance_to_base_plane_mm": 80.44082175,
+        "distance_to_nearest_anchor_mm": 93.17049355861258
+      },
+      {
+        "element": 6961,
+        "J": -1.9893151826861244,
+        "centroid_mm": [
+          140.80019375,
+          197.5,
+          93.15481375
+        ],
+        "distance_to_base_plane_mm": 0.0,
+        "distance_to_nearest_anchor_mm": 8.197364956208283
+      },
+      {
+        "element": 6888,
+        "J": -1.6859479629247427,
+        "centroid_mm": [
+          127.44362625,
+          202.5,
+          62.5
+        ],
+        "distance_to_base_plane_mm": 29.558982999999998,
+        "distance_to_nearest_anchor_mm": 36.401622217079115
+      },
+      {
+        "element": 6972,
+        "J": -1.0934394152660047,
+        "centroid_mm": [
+          162.5,
+          219.22037124999997,
+          95.73160175
+        ],
+        "distance_to_base_plane_mm": 0.0,
+        "distance_to_nearest_anchor_mm": 28.143730015361363
+      },
+      {
+        "element": 8950,
+        "J": -1.031632320149146,
+        "centroid_mm": [
+          147.5,
+          166.870724,
+          72.5
+        ],
+        "distance_to_base_plane_mm": 19.558982999999998,
+        "distance_to_nearest_anchor_mm": 33.62204698504327
+      }
+    ]
+  },
+  "comparison": {
+    "pearson_j": 0.9969706361104733,
+    "lowest_1_percent_overlap_fraction": 0.9368421052631579
+  }
+}

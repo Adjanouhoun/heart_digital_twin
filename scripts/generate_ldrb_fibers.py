@@ -37,14 +37,10 @@ print(f"fiber_vectors shape: {result.fiber_vectors.shape}")
 print(f"Norme moyenne des fibres (doit etre ~1.0) : "
       f"{np.linalg.norm(result.fiber_vectors, axis=1).mean():.4f}")
 
-# --- Ecriture au format attendu par le solveur (3 colonnes fx fy fz par
-#     ligne, PAS le format .lon complet a 6 colonnes fibre+sheet, pour
-#     rester compatible avec le parsing existant de test_fenicsx_real.py
-#     et diag_continuation_coarse.py qui lisent 3 colonnes) ---
+# Ecriture du format LDRB complet : six colonnes fibre + sheet. La mecanique
+# Holzapfel-Ogden orthotrope refuse volontairement les anciens champs 3D.
 OUT_PATH = f"{MESH_DIR}/{PATIENT}_fibers_ldrb.lon"
-with open(OUT_PATH, "w") as f:
-    f.write(f"{len(nodes)}\n")
-    for fv in result.fiber_vectors:
-        f.write(f"{fv[0]:.6f} {fv[1]:.6f} {fv[2]:.6f}\n")
+with open(OUT_PATH, "wb") as f:
+    f.write(result.lon_bytes)
 
 print(f"\nEcrit : {OUT_PATH}")

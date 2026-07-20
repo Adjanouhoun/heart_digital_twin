@@ -1,0 +1,39 @@
+{
+  "sprint": 1,
+  "patient": "patient001_coarse5_fixed",
+  "configuration": {
+    "T_max_kPa": 30.0,
+    "p_endo_kPa": 0.0,
+    "nodes": 2916,
+    "tetrahedra": 9439,
+    "microstructure_components": 6
+  },
+  "solver": {
+    "version": "fenicsx-0.7.3-HO-orthotropic-mixedP2P1-pdirect-ckpt",
+    "converged": true,
+    "load_fraction": 1.0,
+    "iterations": 124,
+    "min_jacobian": 0.5701006309134554,
+    "domain_errors": 0,
+    "resumed_from_checkpoint": true,
+    "duration_seconds": 7027.97814822197
+  },
+  "geometry": {
+    "height_ed_mm": 98.501939,
+    "height_es_mm": 117.16860378806044,
+    "height_change_mm": 18.666664788060444,
+    "apex_dz_mm": -18.66666478806044,
+    "max_displacement_mm": 27.10126044831016,
+    "median_displacement_mm": 12.660057529551935,
+    "endo_radial_disp_mm": -4.593815231981432,
+    "epi_radial_disp_mm": -4.55315155749576
+  },
+  "cavity": {
+    "status": "complete",
+    "V_ed_mL": 298.81446701953604,
+    "V_es_mL": 305.02543552277587,
+    "EF_pct": -2.078536747296697,
+    "reference_EF_pct": 23.65,
+    "absolute_error_points": 25.728536747296694
+  }
+}

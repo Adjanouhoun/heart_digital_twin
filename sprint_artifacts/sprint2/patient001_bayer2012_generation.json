@@ -1,0 +1,52 @@
+{
+  "patient": "patient001_coarse5_fixed",
+  "algorithm": "Bayer2012_Laplace_Dirichlet",
+  "implementation": {
+    "package": "fenicsx-ldrb==0.1.4",
+    "scalar_laplacians": "package",
+    "nodal_gradient_projection": "element_gradient_volume_weighted",
+    "bayer_orientation_rules": "package"
+  },
+  "dolfinx": "0.7.3",
+  "angles_deg": {
+    "alpha_endo": 40,
+    "alpha_epi": -50,
+    "beta_endo": -65,
+    "beta_epi": 25
+  },
+  "facet_markers": {
+    "10": 277,
+    "20": 655,
+    "30": 2141,
+    "40": 2403
+  },
+  "n_exterior_facets": 5476,
+  "gradient_qc": {
+    "lv_gradient": {
+      "min": 0.0,
+      "p01": 0.0,
+      "zero_count": 176
+    },
+    "rv_gradient": {
+      "min": 0.0,
+      "p01": 0.0,
+      "zero_count": 1640
+    },
+    "epi_gradient": {
+      "min": 0.0,
+      "p01": 0.0,
+      "zero_count": 253
+    },
+    "apex_gradient": {
+      "min": 0.0,
+      "p01": 0.0,
+      "zero_count": 149
+    }
+  },
+  "field_finite": true,
+  "fiber_norm_max_abs_error": 8.881784197001252e-16,
+  "sheet_norm_max_abs_error": 1.2212453270876722e-15,
+  "fiber_sheet_dot_max_abs": 9.159339953157541e-16,
+  "duration_seconds": 2.010584592819214,
+  "output": "reports/meshes_acdc/meshes/patient001_coarse5_fixed_fibers_bayer2012.lon"
+}

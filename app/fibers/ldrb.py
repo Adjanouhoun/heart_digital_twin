@@ -103,7 +103,19 @@ class LDRBFiberGenerator:
             fiber = np.cos(alpha) * e_circ + np.sin(alpha) * np.cross(e_trans, e_circ)
             nf = np.linalg.norm(fiber)
             if nf > 1e-10: fiber /= nf
-            sheet = np.cos(beta) * e_trans + np.sin(beta) * np.cross(fiber, e_trans)
+            # Holzapfel-Ogden utilise une base structurale orthonormale.
+            # Apres la rotation helicoidale, e_trans n'est plus garanti
+            # perpendiculaire a la fibre : projeter d'abord dans son plan
+            # normal, puis appliquer l'angle sheet beta.
+            sheet_base = e_trans - np.dot(e_trans, fiber) * fiber
+            nsb = np.linalg.norm(sheet_base)
+            if nsb <= 1e-10:
+                axis = np.eye(3)[np.argmin(np.abs(fiber))]
+                sheet_base = axis - np.dot(axis, fiber) * fiber
+                nsb = np.linalg.norm(sheet_base)
+            sheet_base /= nsb
+            sheet = (np.cos(beta) * sheet_base
+                     + np.sin(beta) * np.cross(fiber, sheet_base))
             ns = np.linalg.norm(sheet)
             if ns > 1e-10: sheet /= ns
             fiber_vecs[i]  = fiber

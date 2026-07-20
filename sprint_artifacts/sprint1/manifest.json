@@ -1,0 +1,71 @@
+{
+  "generated_at_utc": "2026-07-19T12:59:31.560218+00:00",
+  "git": {
+    "commit": "376b7ddd7b9316145eddd6f0b490febad5eb5a61",
+    "dirty": true
+  },
+  "parameters": {
+    "T_max_kPa": 30.0,
+    "dlam_init": 0.0001,
+    "dlam_max": 0.05,
+    "dlam_min": 1e-06,
+    "easy_iteration_threshold": 8,
+    "fenicsx_version": "0.7.3",
+    "j_min_accept": 0.1,
+    "p_endo_kPa": 0.0,
+    "patient": "patient001_coarse5_fixed"
+  },
+  "runtime": {
+    "packages": {
+      "nibabel": "5.4.2",
+      "numpy": "2.4.6",
+      "scikit-image": "0.26.0",
+      "scipy": "1.17.1"
+    },
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "python": "3.11.15"
+  },
+  "schema_version": 1,
+  "scientific_inputs": {
+    "cavity_volume": {
+      "path": "app/solver/mechanics/endo_cavity_volume.py",
+      "sha256": "a3adae5ce953daec2e1749dcd1c99741de8ec36485215f4a237250d1c3cf56aa",
+      "size_bytes": 5298
+    },
+    "ldrb_microstructure": {
+      "path": "reports/meshes_acdc/meshes/patient001_coarse5_fixed_fibers_ldrb.lon",
+      "sha256": "3d4021d36f2b3d0271e94388e151cf859d3c61f35a85a959d40304b7ad643a92",
+      "size_bytes": 166689
+    },
+    "mechanics_solver": {
+      "path": "app/solver/mechanics/fenicsx_solver.py",
+      "sha256": "05bfc520045b1e85222c2e683a91e890e84a1fa9f5d2ce8e2847ac8e73dbd683",
+      "size_bytes": 26099
+    },
+    "mesh_elements": {
+      "path": "reports/meshes_acdc/meshes/patient001_coarse5_fixed.elem",
+      "sha256": "cee82b099e63436a04ffe4f8464063912b947a1bc313bf45f82816f478c8cc2c",
+      "size_bytes": 222840
+    },
+    "mesh_nodes": {
+      "path": "reports/meshes_acdc/meshes/patient001_coarse5_fixed.pts",
+      "sha256": "f4ae8f3f577410a74cd252db10c25bf17b0c5a327e1980f37981c3e83f2f9d99",
+      "size_bytes": 93204
+    },
+    "postprocess_script": {
+      "path": "scripts/postprocess_sprint1.py",
+      "sha256": "fdc17dd146ecb9600bd8ba43ac00d175ff587c29afe9eff8ebba64729764f444",
+      "size_bytes": 1376
+    },
+    "run_script": {
+      "path": "scripts/run_sprint1_orthotropic_full.py",
+      "sha256": "47cee176149a8e3305d73d816ff65011c96e7cce009ae8cff8baeac7dc5d6457",
+      "size_bytes": 3995
+    },
+    "segmentation": {
+      "path": "reports/meshes_acdc/segmentations/patient001_seg.nii.gz",
+      "sha256": "7f734d4947590f342bfa4ee598c35acf7d5034a0307dd00950e14c9a1487107b",
+      "size_bytes": 3169
+    }
+  }
+}

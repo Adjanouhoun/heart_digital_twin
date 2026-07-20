@@ -1,0 +1,15 @@
+{
+  "purpose": "diagnostic_non_physiological",
+  "patient": "patient001_coarse5_fixed",
+  "T_max_kPa": 1.0,
+  "base_bc_mode": "normal_with_rigid_pins",
+  "converged": true,
+  "load_fraction": 1.0,
+  "iterations": 45,
+  "min_jacobian": 0.7746650749521077,
+  "domain_errors": 0,
+  "duration_seconds": 2712.051207780838,
+  "height_change_mm": 7.945466757385574,
+  "apex_dz_mm": -7.945466757385572,
+  "max_displacement_mm": 10.478131520486883
+}
