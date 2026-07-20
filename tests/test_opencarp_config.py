@@ -20,15 +20,17 @@ class TestOpenCARPConfig:
         assert VALIDATED.g_et == 0.0862
 
     def test_dt_standard(self):
-        assert VALIDATED.dt_ms == 0.02
+        # openCARP attend le pas en microsecondes : 20 us = 0.02 ms.
+        assert VALIDATED.dt_us == 20
 
     def test_mesh_units_um(self):
         assert VALIDATED.mesh_units == "um"
 
     def test_par_keywords(self):
-        assert VALIDATED.par_keyword_mesh == "meshname"
-        assert VALIDATED.par_keyword_output == "simID"
-        assert VALIDATED.par_keyword_stim_prefix == "stimulus[0]"
+        par = generate_par_file("/tmp/m", "/tmp/o", 50.0, (0, 0, 0))
+        assert "meshname = /tmp/m" in par
+        assert "simID = /tmp/o" in par
+        assert "stim[0].pulse.strength" in par
 
     def test_generate_par_contains_meshname(self):
         par = generate_par_file("/tmp/m", "/tmp/o", 50.0, (0, 0, 0))

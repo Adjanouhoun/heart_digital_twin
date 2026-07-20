@@ -6,7 +6,37 @@ from app.api.cdt_endpoints import app, sessions
 
 
 @pytest.fixture
-def client():
+def client(tmp_path, monkeypatch):
+    # Le test API vérifie le contrat HTTP, pas les solveurs scientifiques.
+    # Il fournit donc explicitement un maillage minimal et un résultat simulé.
+    (tmp_path / "patient001.pts").write_text(
+        "4\n0 0 0\n1 0 0\n0 1 0\n0 0 1\n"
+    )
+    (tmp_path / "patient001.elem").write_text("1\nTt 0 1 2 3 1\n")
+    (tmp_path / "patient001_fibers.lon").write_text(
+        "1\n1 0 0\n1 0 0\n1 0 0\n1 0 0\n"
+    )
+    monkeypatch.setenv("CDT_MESH_DIR", str(tmp_path))
+
+    class FakeResult:
+        def to_doe_row(self):
+            return {
+                "ef_pct": 55.0,
+                "edv_mL": 120.0,
+                "esv_mL": 54.0,
+                "p_systolic_mmHg": 120.0,
+                "p_diastolic_mmHg": 80.0,
+                "cv_ms": 0.6,
+                "benchmark_passed": True,
+            }
+
+    class FakeCoupledSolver:
+        def simulate(self, *args, **kwargs):
+            return FakeResult()
+
+    monkeypatch.setattr(
+        "app.solver.coupled_solver.CoupledSolver", FakeCoupledSolver
+    )
     sessions.clear()
     return TestClient(app)
 

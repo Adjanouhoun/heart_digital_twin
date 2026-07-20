@@ -1,6 +1,10 @@
 # CDT — Etat d'avancement strict vs Projet de base
 ## Mise a jour : 8 juillet 2026
 
+> **Document historique obsolète.** Le statut consolidé en vigueur est
+> `CDT_ETAT_AVANCEMENT_2026-07-20.md`. Les pourcentages ci-dessous sont
+> conservés pour traçabilité et ne constituent plus une décision d'acceptation.
+
 ---
 
 ## Livrables du projet (11 deliverables, 6 WP)
